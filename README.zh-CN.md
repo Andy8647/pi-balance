@@ -20,6 +20,10 @@
   <a href="./README.md"><img src="https://img.shields.io/badge/🇬🇧_English-6C5CE7?style=flat-square"></a>
 </p>
 
+<p align="center">
+  <img src="https://img.dog/file/1779542581467_mzRI9XShNB2pFCVDlx1f8.webp" alt="pi-balance 预览" width="600">
+</p>
+
 ---
 
 ## 📋 功能特性

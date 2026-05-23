@@ -20,6 +20,10 @@
   <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/🇨🇳_中文-FADB4A?style=flat-square"></a>
 </p>
 
+<p align="center">
+  <img src="https://img.dog/file/1779542581467_mzRI9XShNB2pFCVDlx1f8.webp" alt="pi-balance preview" width="600">
+</p>
+
 ---
 
 ## 📋 Features

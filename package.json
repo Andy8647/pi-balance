@@ -1,6 +1,6 @@
 {
   "name": "pi-balance",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Pi extension that displays provider account balance in the status bar.",
   "license": "MIT",
@@ -45,7 +45,8 @@
   "pi": {
     "extensions": [
       "./dist/index.js"
-    ]
+    ],
+    "image": "https://img.dog/file/1779542581467_mzRI9XShNB2pFCVDlx1f8.webp"
   },
   "engines": {
     "node": ">=20"
