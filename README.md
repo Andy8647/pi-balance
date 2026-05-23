@@ -144,11 +144,28 @@ npm run build
 
 ### Publish Checklist
 
+This project publishes through GitHub Actions when a version tag is pushed.
+
 Before publishing, verify the package contents:
 
 ```bash
 npm pack --dry-run
 ```
+
+Then create and push a tag that matches `package.json`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Before pushing the tag, configure npm Trusted Publishing for this package:
+
+- Publisher: GitHub Actions
+- Owner: `DragonYH`
+- Repository: `pi-balance`
+- Workflow: `release.yml`
+- Environment: leave empty unless you add one to the workflow.
 
 ### Adding a New Provider
 
