@@ -144,11 +144,28 @@ npm run build
 
 ### 发布前检查清单
 
+本项目通过 GitHub Actions 在推送版本 tag 时发布。
+
 发布前请检查 npm 包内容：
 
 ```bash
 npm pack --dry-run
 ```
+
+然后创建并推送与 `package.json` 版本一致的 tag：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+推送 tag 前，请在 npm 为该包配置 Trusted Publishing：
+
+- Publisher：GitHub Actions
+- Owner：`DragonYH`
+- Repository：`pi-balance`
+- Workflow：`release.yml`
+- Environment：如果 workflow 没有配置 environment，则留空。
 
 ### 添加新的提供商
 
