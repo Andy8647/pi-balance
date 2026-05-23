@@ -1,0 +1,60 @@
+{
+  "name": "pi-balance",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pi extension that displays provider account balance in the status bar.",
+  "license": "MIT",
+  "author": "DragonYH <1016633827@qq.com>",
+  "homepage": "https://github.com/DragonYH/pi-balance#readme",
+  "bugs": {
+    "url": "https://github.com/DragonYH/pi-balance/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DragonYH/pi-balance.git"
+  },
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "balance",
+    "status-bar",
+    "ai"
+  ],
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
