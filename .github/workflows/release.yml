@@ -24,13 +24,33 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
+      - name: Read package metadata
+        id: package
+        shell: bash
+        run: |
+          NAME="$(node -p "require('./package.json').name")"
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "name=${NAME}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${VERSION}" >> "${GITHUB_OUTPUT}"
+
       - name: Validate tag matches package version
         shell: bash
         run: |
-          PACKAGE_VERSION="v$(node -p "require('./package.json').version")"
-          if [ "${GITHUB_REF_NAME}" != "${PACKAGE_VERSION}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match package version ${PACKAGE_VERSION}."
+          if [ "${GITHUB_REF_NAME}" != "${{ steps.package.outputs.tag }}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${{ steps.package.outputs.tag }}."
             exit 1
+          fi
+
+      - name: Check npm version
+        id: npm
+        shell: bash
+        run: |
+          if npm view "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}" version >/dev/null 2>&1; then
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+            echo "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} already exists on npm; skipping publish."
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Install dependencies
@@ -43,6 +63,7 @@ jobs:
         run: npm run build
 
       - name: Publish to npm
+        if: steps.npm.outputs.exists == 'false'
         run: npm publish --provenance
 
       - name: Create GitHub Release
