@@ -33,7 +33,7 @@ pi-balance 是 [pi 编码代理](https://github.com/earendil-works/pi-coding-age
 - ✅ **自动识别**当前使用的模型提供商
 - ✅ **实时显示**余额 —— 每 **5 分钟**自动刷新
 - ✅ **切换即更新**—— 切换模型或提供商时立即刷新
-- ✅ **多提供商支持** —— DeepSeek、Sub2Api 及兼容 API
+- ✅ **多提供商支持** —— DeepSeek、Sub2Api、OpenAI Codex 及兼容 API
 - ✅ **余额接口零配置** —— 支持的余额接口可复用模型 headers
 - ✅ **优雅降级** —— 无法获取余额时自动隐藏，不干扰使用
 
@@ -72,6 +72,7 @@ pi install ./
 | **DeepSeek** | `/user/balance` | ¥（人民币）余额 |
 | **Sub2Api** | `/usage` | $（美元）剩余额度 |
 | **兼容 API** | `/usage`、`/v1/usage` | $（美元）剩余额度 |
+| **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5 小时与每周用量剩余额度 |
 
 > 扩展会根据你当前的模型配置自动检测所使用的提供商 —— 无需手动设置。
 
@@ -106,14 +107,18 @@ DeepSeek: ¥49.87
 ```bash
 /balance status
 /balance sub2api
+/balance refresh
+/balance sub2api rescan
 /balance disable deepseek
 /balance toggle sub2api
+/balance toggle codex
 ```
 
 ### 配置说明
 
 - **Provider 显示开关** 会由 `/balance` 菜单保存，并在下一次刷新时生效。
-- **自定义 Sub2Api provider** 会从 pi 模型配置中自动探测，并可在 `/balance sub2api` 中逐个开启或关闭。
+- **自定义 Sub2Api provider** 会从 pi 模型配置中自动探测，并可在 `/balance sub2api` 中逐个开启或关闭。修改模型配置后，可使用 `/balance sub2api rescan` 或二级菜单的 **Rescan providers** 重新扫描。
+- **OpenAI Codex 用量** 仅在当前模型 provider 为 `openai-codex` 时显示。扩展会优先复用 pi 的 Codex 订阅认证 headers，并可在可用时回退到 `codex app-server --listen stdio://`；CLI 回退可在 `/balance` 菜单中开关。
 - 网络请求会快速超时；获取失败时状态栏会自动隐藏，不会打断当前会话。
 
 ## 🧠 工作原理
@@ -184,8 +189,8 @@ npm pack --dry-run
 然后创建并推送与 `package.json` 版本一致的 tag：
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 推送 tag 前，请在 npm 为该包配置 Trusted Publishing：

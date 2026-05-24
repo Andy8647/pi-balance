@@ -1,13 +1,19 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-type BalanceResult = {
-  amount: number;
-  unit: string;
-};
+type BalanceResult =
+  | {
+      amount: number;
+      unit: string;
+    }
+  | {
+      text: string;
+    };
 
 type BalanceFetcher = (
   context: FetchContext,
@@ -21,7 +27,7 @@ type FetchContext = {
   config: BalanceConfig;
 };
 
-type ProviderKey = "deepseek" | "sub2api";
+type ProviderKey = "deepseek" | "sub2api" | "codex";
 
 type ProviderDefinition = {
   key: ProviderKey;
@@ -33,6 +39,7 @@ type ProviderDefinition = {
 type BalanceConfig = {
   disabledProviders: ProviderKey[];
   disabledSub2ApiProviders: string[];
+  codexAppServerFallback: boolean;
 };
 
 type ProviderSupport = {
@@ -42,11 +49,65 @@ type ProviderSupport = {
   details: string[];
 };
 
+type BalanceFetcherEntry = {
+  provider: ProviderKey;
+  fetcher: BalanceFetcher;
+};
+
 const STATUS_KEY = "provider-balance";
 const REQUEST_TIMEOUT_MS = 8000;
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const CONFIG_ENTRY_TYPE = "pi-balance-config";
-const DEFAULT_CONFIG: BalanceConfig = { disabledProviders: [], disabledSub2ApiProviders: [] };
+const DEFAULT_CONFIG: BalanceConfig = {
+  disabledProviders: [],
+  disabledSub2ApiProviders: [],
+  codexAppServerFallback: true,
+};
+const CODEX_PROVIDER_ID = "openai-codex";
+const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+const CODEX_APP_SERVER_TIMEOUT_MS = 15000;
+const CODEX_STATUS_PREFIX = "📊 codex";
+const MAX_ERROR_BODY_CHARS = 600;
+const JWT_CLAIM_PATH = "https://api.openai.com/auth";
+const SUB2API_PROBE_CACHE_TTL_MS = 60 * 1000;
+
+type CodexUsageReport = {
+  source: "pi-auth" | "codex-app-server";
+  capturedAt: number;
+  planType?: string;
+  snapshots: NormalizedRateLimitSnapshot[];
+};
+
+type NormalizedRateLimitSnapshot = {
+  limitId: string;
+  limitName?: string;
+  primary?: NormalizedRateLimitWindow;
+  secondary?: NormalizedRateLimitWindow;
+  credits?: NormalizedCredits;
+};
+
+type NormalizedRateLimitWindow = {
+  usedPercent: number;
+  windowMinutes?: number;
+  resetsAt?: number;
+};
+
+type NormalizedCredits = {
+  hasCredits: boolean;
+  unlimited: boolean;
+  balance?: string;
+};
+
+type PendingRpc = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+};
+
+type RpcResponse = {
+  id?: unknown;
+  result?: unknown;
+  error?: { message?: unknown };
+};
 const PROVIDERS: readonly ProviderDefinition[] = [
   {
     key: "deepseek",
@@ -60,12 +121,19 @@ const PROVIDERS: readonly ProviderDefinition[] = [
     description: "Sub2Api /usage 剩余额度",
     enabledByDefault: true,
   },
+  {
+    key: "codex",
+    label: "OpenAI Codex",
+    description: "OpenAI Codex ChatGPT 订阅用量",
+    enabledByDefault: true,
+  },
 ];
 const PROVIDER_BY_KEY = new Map(PROVIDERS.map((provider) => [provider.key, provider]));
 
-const BALANCE_FETCHERS: readonly BalanceFetcher[] = [
-  tryDeepSeekBalance,
-  trySub2ApiBalance,
+const BALANCE_FETCHERS: readonly BalanceFetcherEntry[] = [
+  { provider: "deepseek", fetcher: tryDeepSeekBalance },
+  { provider: "sub2api", fetcher: trySub2ApiBalance },
+  { provider: "codex", fetcher: tryCodexUsage },
 ];
 
 export default function (pi: ExtensionAPI) {
@@ -118,9 +186,13 @@ export default function (pi: ExtensionAPI) {
       if (version !== requestVersion || controller.signal.aborted) return;
 
       if (result) {
-        const providerName =
-          ctx.modelRegistry.getProviderDisplayName(model.provider) || model.provider;
-        ctx.ui.setStatus(STATUS_KEY, `${providerName}: ${formatBalance(result)}`);
+        if ("text" in result) {
+          ctx.ui.setStatus(STATUS_KEY, result.text);
+        } else {
+          const providerName =
+            ctx.modelRegistry.getProviderDisplayName(model.provider) || model.provider;
+          ctx.ui.setStatus(STATUS_KEY, `${providerName}: ${formatBalance(result)}`);
+        }
       } else {
         ctx.ui.setStatus(STATUS_KEY, undefined);
       }
@@ -141,10 +213,12 @@ export default function (pi: ExtensionAPI) {
     getArgumentCompletions: (prefix: string) => {
       const values = [
         "status",
+        "refresh",
         "enable",
         "disable",
         "toggle",
         "sub2api",
+        "sub2api rescan",
       ];
       const items = values
         .filter((value) => value.startsWith(prefix.trim()))
@@ -156,6 +230,23 @@ export default function (pi: ExtensionAPI) {
       const action = args.trim().toLowerCase();
 
       config = loadConfig(ctx);
+
+      if (action === "refresh") {
+        await refreshBalance(ctx);
+        ctx.ui.notify("余额状态已刷新", "info");
+        return;
+      }
+
+      if (action === "sub2api rescan" || action === "rescan sub2api") {
+        resetSub2ApiProbeCache();
+        ctx.ui.notify("Sub2Api provider 探测缓存已清空，将重新扫描", "info");
+        await openSub2ApiMenu(pi, ctx, config, async (nextConfig) => {
+          config = nextConfig;
+          persistConfig(pi, config);
+          await refreshBalance(ctx);
+        });
+        return;
+      }
 
       if (action === "sub2api") {
         await openSub2ApiMenu(pi, ctx, config, async (nextConfig) => {
@@ -251,6 +342,7 @@ function normalizeConfig(value: unknown): BalanceConfig {
   return {
     disabledProviders: [...new Set(disabledProviders)],
     disabledSub2ApiProviders: [...new Set(disabledSub2ApiProviders)],
+    codexAppServerFallback: record?.codexAppServerFallback !== false,
   };
 }
 
@@ -294,15 +386,20 @@ function setProviderEnabled(
   return { ...config, disabledProviders: [...disabledProviders] };
 }
 
-function getEnabledFetchers(config: BalanceConfig): BalanceFetcher[] {
-  const fetchers: Array<[ProviderKey, BalanceFetcher]> = [
-    ["deepseek", tryDeepSeekBalance],
-    ["sub2api", trySub2ApiBalance],
-  ];
+function getEnabledFetchers(config: BalanceConfig, model: Model<Api>, baseUrl: string): BalanceFetcher[] {
+  return BALANCE_FETCHERS
+    .filter(({ provider }) => isProviderEnabled(config, provider))
+    .filter(({ provider }) => shouldTryProvider(provider, model, baseUrl))
+    .map(({ fetcher }) => fetcher);
+}
 
-  return fetchers
-    .filter(([provider]) => isProviderEnabled(config, provider))
-    .map(([, fetcher]) => fetcher);
+function shouldTryProvider(provider: ProviderKey, model: Model<Api>, baseUrl: string): boolean {
+  if (provider === "codex") return model.provider === CODEX_PROVIDER_ID;
+  if (model.provider === CODEX_PROVIDER_ID) return false;
+  if (provider === "deepseek") {
+    return model.provider === "deepseek" || getProviderRootUrl(baseUrl).includes("deepseek.com");
+  }
+  return true;
 }
 
 function isSub2ApiProviderEnabled(config: BalanceConfig, provider: string): boolean {
@@ -333,11 +430,13 @@ async function openBalanceMenu(
 ): Promise<void> {
   let sub2ApiExpanded = false;
   let deepSeekExpanded = false;
+  let codexExpanded = false;
 
   while (true) {
     const supports = await getProviderSupports(ctx, config);
     const sub2ApiPrefix = sub2ApiExpanded ? "▼" : "▶";
     const deepSeekPrefix = deepSeekExpanded ? "▼" : "▶";
+    const codexPrefix = codexExpanded ? "▼" : "▶";
     const sub2ApiEnabled = isProviderEnabled(config, "sub2api");
     const deepSeekSupport = supports.find((support) => support.provider.key === "deepseek");
     const sub2ApiProviders = await getSub2ApiProviderCandidates(ctx);
@@ -351,7 +450,15 @@ async function openBalanceMenu(
     const deepSeekDisplayOption = deepSeekSupport
       ? `  ${formatEnabled(deepSeekSupport.enabled)} Display`
       : undefined;
+    const codexSupport = supports.find((support) => support.provider.key === "codex");
+    const codexDisplayOption = codexSupport
+      ? `  ${formatEnabled(codexSupport.enabled)} Display`
+      : undefined;
+    const codexFallbackOption = codexSupport
+      ? `  ${formatEnabled(config.codexAppServerFallback)} CLI fallback`
+      : undefined;
     const options = [
+      "Refresh",
       `${sub2ApiPrefix} Sub2Api`,
       ...(sub2ApiExpanded
         ? [
@@ -367,10 +474,22 @@ async function openBalanceMenu(
               : []),
           ]
         : []),
+      ...(codexSupport
+        ? [
+            `${codexPrefix} OpenAI Codex`,
+            ...(codexExpanded && codexDisplayOption ? [codexDisplayOption] : []),
+            ...(codexExpanded && codexFallbackOption ? [codexFallbackOption] : []),
+          ]
+        : []),
       "Back",
     ];
     const choice = await ctx.ui.select("pi-balance", options);
     if (!choice || choice === "Back") return;
+
+    if (choice === "Refresh") {
+      await onConfigChange(config);
+      continue;
+    }
 
     if (choice === `${sub2ApiPrefix} Sub2Api`) {
       sub2ApiExpanded = !sub2ApiExpanded;
@@ -379,6 +498,11 @@ async function openBalanceMenu(
 
     if (choice === `${deepSeekPrefix} DeepSeek`) {
       deepSeekExpanded = !deepSeekExpanded;
+      continue;
+    }
+
+    if (choice === `${codexPrefix} OpenAI Codex`) {
+      codexExpanded = !codexExpanded;
       continue;
     }
 
@@ -406,7 +530,22 @@ async function openBalanceMenu(
       config = nextConfig;
       continue;
     }
+
+    if (choice === codexDisplayOption && codexSupport) {
+      const nextConfig = setProviderEnabled(config, "codex", !codexSupport.enabled);
+      await onConfigChange(nextConfig);
+      config = nextConfig;
+      continue;
+    }
+
+    if (choice === codexFallbackOption && codexSupport) {
+      const nextConfig = { ...config, codexAppServerFallback: !config.codexAppServerFallback };
+      await onConfigChange(nextConfig);
+      config = nextConfig;
+      continue;
+    }
   }
+
 }
 async function openSub2ApiMenu(
   pi: ExtensionAPI,
@@ -424,12 +563,18 @@ async function openSub2ApiMenu(
       ]),
     );
     const options = [
+      "Rescan providers",
       displayOption,
       ...providerOptions.keys(),
       "Back",
     ];
     const choice = await ctx.ui.select("pi-balance / Sub2Api", options);
     if (!choice || choice === "Back") return;
+
+    if (choice === "Rescan providers") {
+      resetSub2ApiProbeCache();
+      continue;
+    }
 
     if (choice === displayOption) {
       const nextConfig = setProviderEnabled(config, "sub2api", !isProviderEnabled(config, "sub2api"));
@@ -468,6 +613,7 @@ async function getSub2ApiBadge(ctx: ExtensionContext, config: BalanceConfig): Pr
 
 let _validatedSub2ApiProviders: string[] | null = null;
 let _sub2ApiProbePromise: Promise<string[]> | null = null;
+let _sub2ApiProbeCachedAt = 0;
 
 async function probeSub2ApiProviders(ctx: ExtensionContext): Promise<string[]> {
   const modelsJsonPath = path.join(os.homedir(), ".pi", "agent", "models.json");
@@ -507,16 +653,15 @@ async function probeSub2ApiProviders(ctx: ExtensionContext): Promise<string[]> {
     }
 
     for (const url of getSub2ApiUsageUrls(baseUrl)) {
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
+      try {
         const response = await fetch(url, {
           method: "GET",
           headers,
           signal: controller.signal,
         });
-        clearTimeout(timeout);
 
         if (!response.ok) continue;
 
@@ -527,6 +672,8 @@ async function probeSub2ApiProviders(ctx: ExtensionContext): Promise<string[]> {
         }
       } catch {
         continue;
+      } finally {
+        clearTimeout(timeout);
       }
     }
   }
@@ -535,17 +682,30 @@ async function probeSub2ApiProviders(ctx: ExtensionContext): Promise<string[]> {
 }
 
 async function getSub2ApiProviderCandidates(ctx: ExtensionContext): Promise<string[]> {
-  if (_validatedSub2ApiProviders !== null) {
+  const now = Date.now();
+  if (
+    _validatedSub2ApiProviders !== null &&
+    now - _sub2ApiProbeCachedAt < SUB2API_PROBE_CACHE_TTL_MS
+  ) {
     return _validatedSub2ApiProviders;
   }
 
   if (!_sub2ApiProbePromise) {
-    _sub2ApiProbePromise = probeSub2ApiProviders(ctx);
+    _sub2ApiProbePromise = probeSub2ApiProviders(ctx).finally(() => {
+      _sub2ApiProbePromise = null;
+    });
   }
 
   const result = await _sub2ApiProbePromise;
   _validatedSub2ApiProviders = result;
+  _sub2ApiProbeCachedAt = Date.now();
   return result;
+}
+
+function resetSub2ApiProbeCache(): void {
+  _validatedSub2ApiProviders = null;
+  _sub2ApiProbeCachedAt = 0;
+  _sub2ApiProbePromise = null;
 }
 async function buildSupportReport(ctx: ExtensionContext, config: BalanceConfig): Promise<string> {
   return formatSupportReport(await getProviderSupports(ctx, config));
@@ -575,6 +735,17 @@ async function getProviderSupports(
     if (provider.key === "sub2api") {
       configured = Boolean(currentBaseUrl) || modelProviders.size > 0;
       details.push("兼容 API 会在当前模型 baseUrl 上尝试 /usage 与 /v1/usage");
+    }
+
+    if (provider.key === "codex") {
+      const hasCodexModel = models.some((model) => model.provider === CODEX_PROVIDER_ID);
+      configured = availableProviders.has(CODEX_PROVIDER_ID) || hasCodexModel;
+      details.push(hasCodexModel ? "已发现 OpenAI Codex 模型" : "未发现 OpenAI Codex 模型");
+      details.push(
+        config.codexAppServerFallback
+          ? "会优先复用 Pi 的 Codex 订阅认证，必要时回退到 codex app-server"
+          : "会仅复用 Pi 的 Codex 订阅认证；codex app-server 回退已关闭",
+      );
     }
 
 
@@ -620,7 +791,7 @@ async function fetchProviderBalance(
   }
 
   const context: FetchContext = { model, baseUrl, headers, config };
-  const fetchers = getEnabledFetchers(config);
+  const fetchers = getEnabledFetchers(config, model, baseUrl);
 
   for (const fetcher of fetchers) {
     if (signal?.aborted) return undefined;
@@ -682,6 +853,465 @@ async function trySub2ApiBalance(
   return undefined;
 }
 
+async function tryCodexUsage(
+  context: FetchContext,
+  signal?: AbortSignal,
+): Promise<BalanceResult | undefined> {
+  if (context.model.provider !== CODEX_PROVIDER_ID) return undefined;
+
+  const report =
+    (await queryCodexUsageViaPiAuth(context.headers, signal)) ??
+    (context.config.codexAppServerFallback
+      ? await queryCodexUsageViaAppServer(signal)
+      : undefined);
+
+  return report ? { text: formatCodexUsageStatusline(report, context.model) } : undefined;
+}
+
+async function queryCodexUsageViaPiAuth(
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<CodexUsageReport | undefined> {
+  if (!hasHeader(headers, "authorization")) return undefined;
+
+  const codexHeaders = buildCodexBackendHeaders(headers);
+  if (!codexHeaders) return undefined;
+
+  const data = await getJsonWithTimeout(CODEX_USAGE_URL, codexHeaders, CODEX_APP_SERVER_TIMEOUT_MS, signal);
+  const payload = getRecord(data);
+  if (!payload) return undefined;
+
+  return normalizeBackendPayload(payload, Date.now(), "pi-auth");
+}
+
+async function queryCodexUsageViaAppServer(signal?: AbortSignal): Promise<CodexUsageReport | undefined> {
+  const client = new CodexAppServerClient(CODEX_APP_SERVER_TIMEOUT_MS, signal);
+  try {
+    await client.start();
+    await client.request("initialize", {
+      clientInfo: { name: "pi_balance", title: "Pi Balance", version: "0.2.1" },
+      capabilities: {
+        experimentalApi: false,
+        optOutNotificationMethods: [],
+      },
+    });
+    client.notify("initialized");
+    const result = await client.request("account/rateLimits/read", undefined);
+    const payload = getRecord(result);
+    return payload ? normalizeAppServerResponse(payload, Date.now()) : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    client.dispose();
+  }
+}
+
+class CodexAppServerClient {
+  private child?: ChildProcessWithoutNullStreams;
+  private nextId = 1;
+  private stderr = "";
+  private readonly pending = new Map<number, PendingRpc>();
+  private startPromise?: Promise<void>;
+  private exitError?: Error;
+
+  constructor(
+    private readonly timeoutMs: number,
+    private readonly signal?: AbortSignal,
+  ) {}
+
+  start(): Promise<void> {
+    if (this.startPromise) return this.startPromise;
+
+    this.startPromise = new Promise((resolve, reject) => {
+      if (this.signal?.aborted) {
+        reject(new Error("Codex usage request aborted."));
+        return;
+      }
+
+      const child = spawn("codex", ["app-server", "--listen", "stdio://"], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      this.child = child;
+
+      const startupTimeout = setTimeout(() => {
+        reject(new Error(`Timed out after ${Math.round(this.timeoutMs / 1000)}s starting codex app-server.`));
+      }, this.timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(startupTimeout);
+        this.signal?.removeEventListener("abort", abort);
+      };
+      const abort = () => {
+        cleanup();
+        this.dispose();
+        reject(new Error("Codex usage request aborted."));
+      };
+      this.signal?.addEventListener("abort", abort, { once: true });
+
+      child.once("spawn", () => {
+        cleanup();
+        resolve();
+      });
+
+      child.once("error", (error) => {
+        cleanup();
+        reject(new Error(`Failed to start codex app-server: ${error.message}`));
+        this.rejectAll(error);
+      });
+
+      child.once("exit", (code, signalName) => {
+        const suffix = this.stderr ? ` stderr: ${redactErrorBody(this.stderr)}` : "";
+        this.exitError = new Error(
+          `codex app-server exited before completing the request (code ${code ?? "unknown"}, signal ${signalName ?? "none"}).${suffix}`,
+        );
+        this.rejectAll(this.exitError);
+      });
+
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        this.stderr = truncateEnd(this.stderr + chunk, MAX_ERROR_BODY_CHARS);
+      });
+
+      createInterface({ input: child.stdout }).on("line", (line) => this.handleLine(line));
+    });
+
+    return this.startPromise;
+  }
+
+  request(method: string, params: unknown): Promise<unknown> {
+    const child = this.child;
+    if (!child?.stdin.writable) throw new Error("codex app-server is not running.");
+    if (this.exitError) throw this.exitError;
+
+    const id = this.nextId++;
+    const payload = params === undefined ? { method, id } : { method, id, params };
+    const response = new Promise<unknown>((resolve: (value: unknown) => void, reject: (error: Error) => void) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Timed out after ${Math.round(this.timeoutMs / 1000)}s waiting for ${method}.`));
+      }, this.timeoutMs);
+
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timeout);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
+      });
+    });
+
+    child.stdin.write(`${JSON.stringify(payload)}\n`);
+    return response;
+  }
+
+  notify(method: string): void {
+    const child = this.child;
+    if (!child?.stdin.writable) return;
+    child.stdin.write(`${JSON.stringify({ method })}\n`);
+  }
+
+  dispose(): void {
+    for (const [id, pending] of this.pending) {
+      pending.reject(new Error(`codex app-server request ${id} cancelled.`));
+    }
+    this.pending.clear();
+
+    const child = this.child;
+    if (!child) return;
+    child.stdin.end();
+    if (!child.killed) child.kill();
+    this.child = undefined;
+  }
+
+  private handleLine(line: string): void {
+    let parsed: RpcResponse;
+    try {
+      parsed = JSON.parse(line) as RpcResponse;
+    } catch {
+      return;
+    }
+
+    if (typeof parsed.id !== "number") return;
+    const pending = this.pending.get(parsed.id);
+    if (!pending) return;
+    this.pending.delete(parsed.id);
+
+    if (parsed.error) {
+      const message = typeof parsed.error.message === "string" ? parsed.error.message : "unknown error";
+      pending.reject(new Error(`codex app-server request failed: ${message}`));
+      return;
+    }
+
+    pending.resolve(parsed.result);
+  }
+
+  private rejectAll(error: Error): void {
+    for (const pending of this.pending.values()) pending.reject(error);
+    this.pending.clear();
+  }
+}
+
+export function normalizeBackendPayload(
+  payload: Record<string, unknown>,
+  capturedAt: number,
+  source: "pi-auth" | "codex-app-server",
+): CodexUsageReport | undefined {
+  const snapshots: NormalizedRateLimitSnapshot[] = [];
+  const primary = normalizeBackendSnapshot("codex", undefined, payload.rate_limit, payload.credits);
+  if (primary) snapshots.push(primary);
+
+  const additional = Array.isArray(payload.additional_rate_limits) ? payload.additional_rate_limits : [];
+  for (const item of additional) {
+    const additionalLimit = getRecord(item);
+    if (!additionalLimit) continue;
+    const limitId = asString(additionalLimit.metered_feature) ?? asString(additionalLimit.limit_name);
+    if (!limitId) continue;
+    const snapshot = normalizeBackendSnapshot(
+      limitId,
+      asString(additionalLimit.limit_name),
+      additionalLimit.rate_limit,
+      undefined,
+    );
+    if (snapshot) snapshots.push(snapshot);
+  }
+
+  return snapshots.length > 0
+    ? { source, capturedAt, planType: asString(payload.plan_type), snapshots }
+    : undefined;
+}
+
+function normalizeBackendSnapshot(
+  limitId: string,
+  limitName: string | undefined,
+  rateLimit: unknown,
+  credits: unknown,
+): NormalizedRateLimitSnapshot | undefined {
+  const details = getRecord(rateLimit);
+  const primary = details ? normalizeBackendWindow(details.primary_window) : undefined;
+  const secondary = details ? normalizeBackendWindow(details.secondary_window) : undefined;
+  const normalizedCredits = normalizeCredits(credits, "backend");
+  if (!primary && !secondary && !normalizedCredits) return undefined;
+  return { limitId, limitName, primary, secondary, credits: normalizedCredits };
+}
+
+function normalizeBackendWindow(value: unknown): NormalizedRateLimitWindow | undefined {
+  const window = getRecord(value);
+  if (!window) return undefined;
+  const usedPercent = toNumber(window.used_percent);
+  if (usedPercent === undefined) return undefined;
+  const limitSeconds = toNumber(window.limit_window_seconds);
+  return {
+    usedPercent,
+    windowMinutes: limitSeconds && limitSeconds > 0 ? Math.ceil(limitSeconds / 60) : undefined,
+    resetsAt: toNumber(window.reset_at),
+  };
+}
+
+export function normalizeAppServerResponse(
+  response: Record<string, unknown>,
+  capturedAt: number,
+): CodexUsageReport | undefined {
+  const snapshots: NormalizedRateLimitSnapshot[] = [];
+  const addSnapshot = (raw: unknown, fallbackId: string) => {
+    const snapshot = normalizeAppServerSnapshot(raw, fallbackId);
+    if (!snapshot) return;
+    const index = snapshots.findIndex((item) => item.limitId === snapshot.limitId);
+    if (index >= 0) snapshots[index] = { ...snapshots[index], ...snapshot };
+    else snapshots.push(snapshot);
+  };
+
+  addSnapshot(response.rateLimits, "codex");
+  const byId = getRecord(response.rateLimitsByLimitId);
+  if (byId) {
+    for (const [limitId, raw] of Object.entries(byId)) addSnapshot(raw, limitId);
+  }
+
+  return snapshots.length > 0
+    ? {
+        source: "codex-app-server",
+        capturedAt,
+        planType: asString(getRecord(response.rateLimits)?.planType),
+        snapshots,
+      }
+    : undefined;
+}
+
+function normalizeAppServerSnapshot(
+  raw: unknown,
+  fallbackId: string,
+): NormalizedRateLimitSnapshot | undefined {
+  const snapshot = getRecord(raw);
+  if (!snapshot) return undefined;
+  const primary = normalizeAppServerWindow(snapshot.primary);
+  const secondary = normalizeAppServerWindow(snapshot.secondary);
+  const credits = normalizeCredits(snapshot.credits, "app-server");
+  if (!primary && !secondary && !credits) return undefined;
+  return {
+    limitId: asString(snapshot.limitId) ?? fallbackId,
+    limitName: asString(snapshot.limitName),
+    primary,
+    secondary,
+    credits,
+  };
+}
+
+function normalizeAppServerWindow(value: unknown): NormalizedRateLimitWindow | undefined {
+  const window = getRecord(value);
+  if (!window) return undefined;
+  const usedPercent = toNumber(window.usedPercent);
+  if (usedPercent === undefined) return undefined;
+  return {
+    usedPercent,
+    windowMinutes: toNumber(window.windowDurationMins),
+    resetsAt: toNumber(window.resetsAt),
+  };
+}
+
+function normalizeCredits(value: unknown, source: "backend" | "app-server"): NormalizedCredits | undefined {
+  const credits = getRecord(value);
+  if (!credits) return undefined;
+  const hasCredits = asBoolean(source === "backend" ? credits.has_credits : credits.hasCredits);
+  const unlimited = asBoolean(credits.unlimited);
+  if (hasCredits === undefined || unlimited === undefined) return undefined;
+  return { hasCredits, unlimited, balance: asString(credits.balance) };
+}
+
+export function formatCodexUsageStatusline(
+  report: CodexUsageReport,
+  model?: Pick<Model<Api>, "id" | "name" | "provider">,
+): string {
+  const snapshot = selectCodexSnapshot(report, model);
+  if (!snapshot) return `${CODEX_STATUS_PREFIX} unavailable`;
+
+  const parts = [`${CODEX_STATUS_PREFIX}${formatCodexStatuslineSuffix(snapshot)}`];
+  if (snapshot.primary) parts.push(`${formatRemainingPercent(snapshot.primary)} 5h`);
+  if (snapshot.secondary) parts.push(`${formatRemainingPercent(snapshot.secondary)} wk`);
+  if (parts.length === 1 && snapshot.credits) parts.push(formatCredits(snapshot.credits));
+  return parts.join(" ");
+}
+
+export function selectCodexSnapshot(
+  report: CodexUsageReport,
+  model?: Pick<Model<Api>, "id" | "name" | "provider">,
+): NormalizedRateLimitSnapshot | undefined {
+  const primary = report.snapshots.find(isPrimaryCodexSnapshot);
+  if (!model || model.provider !== CODEX_PROVIDER_ID) return primary ?? report.snapshots[0];
+
+  const keys = normalizedModelUsageKeys(model);
+  const exact = report.snapshots.find((snapshot) =>
+      !isPrimaryCodexSnapshot(snapshot) &&
+      normalizedSnapshotUsageKeys(snapshot).some((key) => keys.has(key)),
+  );
+  if (exact) return exact;
+
+  for (const variant of codexModelVariantKeys(keys)) {
+    const matches = report.snapshots.filter(
+      (snapshot) =>
+        !isPrimaryCodexSnapshot(snapshot) &&
+        normalizedSnapshotUsageKeys(snapshot).some((key) => normalizedKeyHasToken(key, variant)),
+    );
+    if (matches.length === 1) return matches[0];
+  }
+
+  return primary ?? report.snapshots[0];
+}
+
+function normalizedModelUsageKeys(model: Pick<Model<Api>, "id" | "name">): Set<string> {
+  const keys = new Set<string>();
+  addNormalizedUsageKey(keys, model.id);
+  addNormalizedUsageKey(keys, model.name);
+
+  for (const key of [...keys]) {
+    const codexIndex = key.indexOf("codex");
+    if (codexIndex >= 0) keys.add(key.slice(codexIndex));
+  }
+
+  return keys;
+}
+
+function addNormalizedUsageKey(keys: Set<string>, value: string | undefined): void {
+  const key = normalizedUsageKey(value);
+  if (key) keys.add(key);
+}
+
+function normalizedSnapshotUsageKeys(snapshot: NormalizedRateLimitSnapshot): string[] {
+  return [normalizedUsageKey(snapshot.limitId), normalizedUsageKey(snapshot.limitName)].filter(
+    (key): key is string => key !== undefined,
+  );
+}
+
+function normalizedUsageKey(value: string | undefined): string | undefined {
+  const key = value
+    ?.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return key || undefined;
+}
+
+function codexModelVariantKeys(modelKeys: Set<string>): string[] {
+  const variants = new Set<string>();
+  for (const key of modelKeys) {
+    const match = key.match(/(?:^|-)codex-(.+)$/);
+    if (match?.[1]) variants.add(match[1]);
+  }
+  return [...variants];
+}
+
+function normalizedKeyHasToken(key: string, token: string): boolean {
+  return key === token || key.startsWith(`${token}-`) || key.endsWith(`-${token}`) || key.includes(`-${token}-`);
+}
+
+function formatCodexStatuslineSuffix(snapshot: NormalizedRateLimitSnapshot): string {
+  if (isPrimaryCodexSnapshot(snapshot)) return "";
+  const label = snapshot.limitName ?? snapshot.limitId;
+  const normalized = label.replace(/[_-]+/g, " ").trim();
+  const codexVariant = normalized.match(/\bcodex\s+(.+)$/i)?.[1]?.trim();
+  const compact = (codexVariant || normalized).toLowerCase().replace(/\s+/g, " ");
+  return compact ? ` ${compact}` : "";
+}
+
+function isPrimaryCodexSnapshot(snapshot: NormalizedRateLimitSnapshot): boolean {
+  return normalizedUsageKey(snapshot.limitId) === "codex" || normalizedUsageKey(snapshot.limitName) === "codex";
+}
+
+function formatRemainingPercent(window: NormalizedRateLimitWindow): string {
+  return `${(100 - clampPercent(window.usedPercent)).toFixed(0)}%`;
+}
+
+function formatCredits(credits: NormalizedCredits): string {
+  if (!credits.hasCredits) return "no credits";
+  if (credits.unlimited) return "unlimited";
+  const balance = credits.balance?.trim();
+  return balance ? `${formatNumber(Number(balance), balance)} credits` : "credits";
+}
+
+async function getJsonWithTimeout(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  parentSignal?: AbortSignal,
+): Promise<unknown> {
+  if (parentSignal?.aborted) return undefined;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const timeout = setTimeout(abort, timeoutMs);
+  parentSignal?.addEventListener("abort", abort, { once: true });
+
+  try {
+    const response = await fetch(url, { method: "GET", headers, signal: controller.signal });
+    if (!response.ok) return undefined;
+    return await response.json();
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
+    parentSignal?.removeEventListener("abort", abort);
+  }
+}
+
 async function getJson(
   url: string,
   headers: Record<string, string>,
@@ -713,6 +1343,44 @@ async function getJson(
   }
 }
 
+function buildCodexBackendHeaders(headers: Record<string, string>): Record<string, string> | undefined {
+  const token = extractBearerToken(headers);
+  if (!token) return undefined;
+
+  const accountId = extractCodexAccountId(token);
+  if (!accountId) return undefined;
+
+  return {
+    ...headers,
+    Authorization: `Bearer ${token}`,
+    "chatgpt-account-id": accountId,
+    originator: "pi",
+    "User-Agent": `pi (${os.platform()} ${os.release()}; ${os.arch()})`,
+  };
+}
+
+function extractBearerToken(headers: Record<string, string>): string | undefined {
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() !== "authorization") continue;
+    const match = value.match(/^Bearer\s+(.+)$/i);
+    return match?.[1]?.trim();
+  }
+
+  return undefined;
+}
+
+function extractCodexAccountId(token: string): string | undefined {
+  const parts = token.split(".");
+  if (parts.length !== 3) return undefined;
+
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as unknown;
+    return asString(getRecord(getRecord(payload)?.[JWT_CLAIM_PATH])?.chatgpt_account_id);
+  } catch {
+    return undefined;
+  }
+}
+
 
 function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   if (!baseUrl) return undefined;
@@ -727,7 +1395,7 @@ function getProviderRootUrl(baseUrl: string): string {
   return baseUrl.replace(/\/v1$/i, "");
 }
 
-function getSub2ApiUsageUrls(baseUrl: string): string[] {
+export function getSub2ApiUsageUrls(baseUrl: string): string[] {
   const urls = [`${baseUrl}/usage`];
 
   if (/\/v1$/i.test(baseUrl)) {
@@ -740,7 +1408,7 @@ function getSub2ApiUsageUrls(baseUrl: string): string[] {
 }
 
 
-function extractRemaining(value: unknown): number | undefined {
+export function extractRemaining(value: unknown): number | undefined {
   const record = getRecord(value);
   if (!record) return undefined;
 
@@ -768,6 +1436,39 @@ function toNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(100, Math.max(0, value));
+}
+
+function formatNumber(value: number, fallback: string): string {
+  if (!Number.isFinite(value)) return fallback;
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+}
+
+function redactErrorBody(body: string): string {
+  return truncateEnd(
+    body
+      .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer <redacted>")
+      .replace(/"access_token"\s*:\s*"[^"]+"/gi, '"access_token":"<redacted>"')
+      .trim(),
+    MAX_ERROR_BODY_CHARS,
+  );
+}
+
+function truncateEnd(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars - 1)}…`;
+}
+
 function hasHeader(headers: Record<string, string>, headerName: string): boolean {
   const normalizedHeaderName = headerName.toLowerCase();
   return Object.keys(headers).some((key) => key.toLowerCase() === normalizedHeaderName);
@@ -784,6 +1485,8 @@ function currencyToUnit(currency: string | undefined): string | undefined {
 }
 
 function formatBalance(result: BalanceResult): string {
+  if ("text" in result) return result.text;
+
   const amount = result.amount.toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,

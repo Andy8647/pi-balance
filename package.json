@@ -1,6 +1,6 @@
 {
   "name": "pi-balance",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Pi extension that displays provider account balance in the status bar.",
   "license": "MIT",
@@ -39,6 +39,7 @@
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
+    "test": "node --test --import tsx tests/**/*.test.ts",
     "prepack": "npm run clean && npm run build",
     "prepublishOnly": "npm run typecheck && npm run build"
   },
@@ -56,6 +57,7 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
-  }
+}
 }

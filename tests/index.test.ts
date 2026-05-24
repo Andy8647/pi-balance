@@ -1,0 +1,147 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  extractRemaining,
+  formatCodexUsageStatusline,
+  getSub2ApiUsageUrls,
+  normalizeAppServerResponse,
+  normalizeBackendPayload,
+  selectCodexSnapshot,
+} from "../src/index.ts";
+
+test("getSub2ApiUsageUrls tries both root and v1 usage endpoints", () => {
+  assert.deepEqual(getSub2ApiUsageUrls("https://api.example.com/v1"), [
+    "https://api.example.com/v1/usage",
+    "https://api.example.com/usage",
+  ]);
+  assert.deepEqual(getSub2ApiUsageUrls("https://api.example.com"), [
+    "https://api.example.com/usage",
+    "https://api.example.com/v1/usage",
+  ]);
+});
+
+test("extractRemaining supports common Sub2Api response shapes", () => {
+  assert.equal(extractRemaining({ remaining: "12.5" }), 12.5);
+  assert.equal(extractRemaining({ data: { remaining: 3 } }), 3);
+  assert.equal(extractRemaining({ usage: { remaining: "9" } }), 9);
+  assert.equal(extractRemaining({ usage: { used: 9 } }), undefined);
+});
+
+test("normalizeBackendPayload parses backend rate limits and credits", () => {
+  const report = normalizeBackendPayload(
+    {
+      plan_type: "plus",
+      rate_limit: {
+        primary_window: { used_percent: 25, limit_window_seconds: 18_000, reset_at: 123 },
+        secondary_window: { used_percent: "50%", limit_window_seconds: 604_800, reset_at: 456 },
+      },
+      credits: { has_credits: true, unlimited: false, balance: "42.5" },
+    },
+    1000,
+    "pi-auth",
+  );
+
+  assert.equal(report?.source, "pi-auth");
+  assert.equal(report?.planType, "plus");
+  assert.equal(report?.snapshots[0]?.primary?.usedPercent, 25);
+  assert.equal(report?.snapshots[0]?.secondary?.usedPercent, 50);
+  assert.equal(report?.snapshots[0]?.credits?.balance, "42.5");
+});
+
+test("normalizeAppServerResponse parses app-server multi bucket response", () => {
+  const report = normalizeAppServerResponse(
+    {
+      rateLimits: {
+        limitId: "codex",
+        limitName: "Codex",
+        primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 123 },
+        secondary: null,
+        credits: null,
+        planType: "pro",
+      },
+      rateLimitsByLimitId: {
+        "gpt-5-codex": {
+          limitId: "gpt-5-codex",
+          limitName: "GPT-5 Codex",
+          primary: { usedPercent: 80, windowDurationMins: 300, resetsAt: 456 },
+          secondary: { usedPercent: 20, windowDurationMins: 10_080, resetsAt: 789 },
+          credits: { hasCredits: true, unlimited: false, balance: "7" },
+        },
+      },
+    },
+    2000,
+  );
+
+  assert.equal(report?.source, "codex-app-server");
+  assert.equal(report?.planType, "pro");
+  assert.equal(report?.snapshots.length, 2);
+  assert.equal(report?.snapshots[1]?.limitId, "gpt-5-codex");
+  assert.equal(report?.snapshots[1]?.credits?.balance, "7");
+});
+
+test("selectCodexSnapshot prefers the active Codex model bucket", () => {
+  const report = normalizeAppServerResponse(
+    {
+      rateLimits: {
+        limitId: "codex",
+        limitName: "Codex",
+        primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 123 },
+        secondary: null,
+        credits: null,
+      },
+      rateLimitsByLimitId: {
+        "gpt-5-codex": {
+          limitId: "gpt-5-codex",
+          limitName: "GPT-5 Codex",
+          primary: { usedPercent: 80, windowDurationMins: 300, resetsAt: 456 },
+          secondary: null,
+          credits: null,
+        },
+      },
+    },
+    2000,
+  );
+
+  assert.ok(report);
+  const selected = selectCodexSnapshot(report, {
+    provider: "openai-codex",
+    id: "gpt-5-codex",
+    name: "GPT-5 Codex",
+  });
+  assert.equal(selected?.limitId, "gpt-5-codex");
+});
+
+test("formatCodexUsageStatusline formats remaining percentage and credits fallback", () => {
+  const usageReport = normalizeAppServerResponse(
+    {
+      rateLimits: {
+        limitId: "codex",
+        limitName: "Codex",
+        primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 123 },
+        secondary: { usedPercent: 40, windowDurationMins: 10_080, resetsAt: 456 },
+        credits: null,
+      },
+      rateLimitsByLimitId: null,
+    },
+    2000,
+  );
+  assert.ok(usageReport);
+  assert.equal(formatCodexUsageStatusline(usageReport), "📊 codex 75% 5h 60% wk");
+
+  const creditsReport = normalizeAppServerResponse(
+    {
+      rateLimits: {
+        limitId: "codex",
+        limitName: "Codex",
+        primary: null,
+        secondary: null,
+        credits: { hasCredits: true, unlimited: false, balance: "12.345" },
+      },
+      rateLimitsByLimitId: null,
+    },
+    2000,
+  );
+  assert.ok(creditsReport);
+  assert.equal(formatCodexUsageStatusline(creditsReport), "📊 codex 12.35 credits");
+});

@@ -33,7 +33,7 @@ pi-balance is an **extension** for the [pi coding agent](https://github.com/eare
 - ✅ **Auto-detects** your currently active model provider
 - ✅ **Real-time** balance display — refreshes every **5 minutes**
 - ✅ **Live updates** on provider/model switch
-- ✅ **Multi-provider support** — DeepSeek, Sub2Api (and compatible APIs)
+- ✅ **Multi-provider support** — DeepSeek, Sub2Api, OpenAI Codex (and compatible APIs)
 - ✅ **Zero configuration for balance APIs** — supported balance APIs work from existing model headers
 - ✅ **Graceful fallback** — quietly hides when balance info is unavailable
 
@@ -72,6 +72,7 @@ Restart pi. You should see the balance indicator appear in the status bar once y
 | **DeepSeek** | `/user/balance` | ¥ (CNY) balance |
 | **Sub2Api** | `/usage` | $ (USD) remaining balance |
 | **Compatible APIs** | `/usage`, `/v1/usage` | $ (USD) remaining balance |
+| **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5-hour and weekly usage remaining |
 
 > The extension automatically detects which provider you're using based on your current model configuration — no manual setup required.
 
@@ -106,14 +107,18 @@ You can also use command arguments directly:
 ```bash
 /balance status
 /balance sub2api
+/balance refresh
+/balance sub2api rescan
 /balance disable deepseek
 /balance toggle sub2api
+/balance toggle codex
 ```
 
 ### Configuration Notes
 
 - **Provider display toggles** are saved by the `/balance` menu and apply on the next refresh.
-- **Custom Sub2Api providers** are discovered from your pi model configuration and can be enabled or disabled individually from `/balance sub2api`.
+- **Custom Sub2Api providers** are discovered from your pi model configuration and can be enabled or disabled individually from `/balance sub2api`. Use `/balance sub2api rescan` or the submenu's **Rescan providers** item after changing model configuration.
+- **OpenAI Codex usage** is shown only while the active model provider is `openai-codex`. The extension first reuses pi's Codex subscription auth headers and can fall back to `codex app-server --listen stdio://` when available; the CLI fallback can be toggled in the `/balance` menu.
 - Network requests time out quickly and failures are hidden from the status bar instead of interrupting your session.
 
 ## 🧠 How It Works
@@ -184,8 +189,8 @@ npm pack --dry-run
 Then create and push a tag that matches `package.json`:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 Before pushing the tag, configure npm Trusted Publishing for this package:
