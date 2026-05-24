@@ -28,14 +28,14 @@
 
 ## 📋 功能特性
 
-pi-balance 是 [pi 编码代理](https://github.com/earendil-works/pi-coding-agent) 的一款**扩展**，能够自动获取并在 pi **状态栏**中实时显示你的 AI 提供商 API 额度余额。
+pi-balance 是 [pi 编码代理](https://github.com/earendil-works/pi-coding-agent) 的一款**扩展**，能够自动获取并在 pi **状态栏**中实时显示你的 AI 提供商 API 额度余额或 usage 限额。
 
 - ✅ **自动识别**当前使用的模型提供商
-- ✅ **实时显示**余额 —— 每 **5 分钟**自动刷新
+- ✅ **实时显示**余额或 usage 限额 —— 每 **5 分钟**自动刷新
 - ✅ **切换即更新**—— 切换模型或提供商时立即刷新
-- ✅ **多提供商支持** —— DeepSeek、Sub2Api 及兼容 API
-- ✅ **零配置** —— 安装即可使用，无需额外设置
-- ✅ **优雅降级** —— 无法获取余额时自动隐藏，不干扰使用
+- ✅ **多提供商支持** —— DeepSeek、Sub2Api、OpenCode Go 及兼容 API
+- ✅ **余额接口零配置** —— OpenCode Go 可通过 `/balance`、环境变量或模型 headers 配置
+- ✅ **优雅降级** —— 无法获取余额或 usage 限额时自动隐藏，不干扰使用
 
 ## 📦 安装
 
@@ -67,13 +67,16 @@ pi install ./
 
 ## 🔌 支持的提供商
 
-| 提供商 | 余额接口 | 货币单位 |
+| 提供商 | 余额 / Usage 接口 | 显示内容 |
 |----------|-----------------|----------|
-| **DeepSeek** | `/user/balance` | ¥（人民币） |
-| **Sub2Api** | `/usage` | $（美元） |
-| **兼容 API** | `/usage`、`/v1/usage` | $（美元） |
+| **DeepSeek** | `/user/balance` | ¥（人民币）余额 |
+| **Sub2Api** | `/usage` | $（美元）剩余额度 |
+| **OpenCode Go** | `https://opencode.ai/workspace/{workspaceId}/go` | Rolling / Weekly / Monthly usage 限额 |
+| **兼容 API** | `/usage`、`/v1/usage` | $（美元）剩余额度 |
 
 > 扩展会根据你当前的模型配置自动检测所使用的提供商 —— 无需手动设置。
+
+> OpenCode Go dashboard usage 需要提供 dashboard workspace ID 和 auth cookie。可使用 `OPENCODE_GO_WORKSPACE_ID` + `OPENCODE_GO_AUTH_COOKIE`（或 `OPENCODE_GO_AUTH_TOKEN`），也可通过模型 headers 提供 `x-opencode-workspace-id` 和 `x-opencode-auth`。
 
 ## 🚀 使用
 
@@ -83,13 +86,42 @@ pi install ./
 2. **切换模型时** —— 刷新新提供商的余额
 3. **自动刷新** —— 每 **5 分钟**更新一次余额
 
-余额显示在 pi 终端底部的**状态栏**中：
+余额或 usage 限额显示在 pi 终端底部的**状态栏**中：
 
 ```
 DeepSeek: ¥49.87
+OpenCode: Rolling 42% (3h) · Weekly 18% (2d)
 ```
 
-> 如果扩展无法获取余额（例如提供商不支持或网络问题），状态栏条目会自动隐藏。
+> 如果扩展无法确定你的余额或 usage 限额（例如不支持的提供商、OpenCode workspace/auth 信息缺失或网络问题），状态栏条目会优雅隐藏。
+
+### `/balance` 命令
+
+使用 `/balance` 打开更清晰的分组配置菜单，可以：
+
+- 查看当前已配置 provider 的支持情况
+- 进入 **OpenCode Go** 二级菜单，直接配置 Workspace ID
+- 进入 **Sub2Api** 二级菜单，开关用户自定义的 Sub2Api provider
+- 开启或关闭某个 provider 的状态栏显示
+- 立即刷新当前状态栏
+
+也可以直接使用命令参数：
+
+```bash
+/balance status
+/balance opencode-go
+/balance sub2api
+/balance enable opencode-go
+/balance disable deepseek
+/balance toggle sub2api
+```
+
+### 配置说明
+
+- **Provider 显示开关** 会由 `/balance` 菜单保存，并在下一次刷新时生效。
+- **OpenCode Go** 需要 dashboard workspace ID 和 auth 信息。可以设置 `OPENCODE_GO_WORKSPACE_ID` 与 `OPENCODE_GO_AUTH_COOKIE` / `OPENCODE_GO_AUTH_TOKEN`，在 `/balance` 中配置 workspace ID，或通过模型 headers 提供 `x-opencode-workspace-id` 和 `x-opencode-auth`。
+- **自定义 Sub2Api provider** 会从 pi 模型配置中自动探测，并可在 `/balance sub2api` 中逐个开启或关闭。
+- 网络请求会快速超时；获取失败时状态栏会自动隐藏，不会打断当前会话。
 
 ## 🧠 工作原理
 
@@ -159,8 +191,8 @@ npm pack --dry-run
 然后创建并推送与 `package.json` 版本一致的 tag：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 推送 tag 前，请在 npm 为该包配置 Trusted Publishing：

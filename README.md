@@ -34,7 +34,7 @@ pi-balance is an **extension** for the [pi coding agent](https://github.com/eare
 - ✅ **Real-time** balance display — refreshes every **5 minutes**
 - ✅ **Live updates** on provider/model switch
 - ✅ **Multi-provider support** — DeepSeek, Sub2Api (and compatible APIs)
-- ✅ **Zero configuration** — just install and it works
+- ✅ **Zero configuration for balance APIs** — OpenCode Go can be configured from `/balance` or environment/model headers
 - ✅ **Graceful fallback** — quietly hides when balance info is unavailable
 
 ## 📦 Installation
@@ -67,13 +67,16 @@ Restart pi. You should see the balance indicator appear in the status bar once y
 
 ## 🔌 Supported Providers
 
-| Provider | Balance Endpoint | Currency |
-|----------|-----------------|----------|
-| **DeepSeek** | `/user/balance` | ¥ (CNY) |
-| **Sub2Api** | `/usage` | $ (USD) |
-| **Compatible APIs** | `/usage`, `/v1/usage` | $ (USD) |
+| Provider | Balance / Usage Endpoint | Display |
+|----------|--------------------------|---------|
+| **DeepSeek** | `/user/balance` | ¥ (CNY) balance |
+| **Sub2Api** | `/usage` | $ (USD) remaining balance |
+| **OpenCode Go** | `https://opencode.ai/workspace/{workspaceId}/go` | Rolling / Weekly / Monthly usage limits |
+| **Compatible APIs** | `/usage`, `/v1/usage` | $ (USD) remaining balance |
 
 > The extension automatically detects which provider you're using based on your current model configuration — no manual setup required.
+
+> OpenCode Go dashboard usage requires the dashboard workspace ID and auth cookie. You can provide them with `OPENCODE_GO_WORKSPACE_ID` plus `OPENCODE_GO_AUTH_COOKIE` (or `OPENCODE_GO_AUTH_TOKEN`), or via model headers (`x-opencode-workspace-id` and `x-opencode-auth`).
 
 ## 🚀 Usage
 
@@ -83,13 +86,42 @@ Once installed, pi-balance works **completely automatically**:
 2. **On model switch** — it re-fetches for the new provider
 3. **Auto-refresh** — balances are refreshed every **5 minutes**
 
-The balance is displayed in the **status bar** at the bottom of your pi terminal:
+The balance or usage limit is displayed in the **status bar** at the bottom of your pi terminal:
 
 ```
 DeepSeek: ¥49.87
+OpenCode: Rolling 42% (3h) · Weekly 18% (2d)
 ```
 
-> If the extension cannot determine your balance (e.g., unsupported provider or network issue), the status bar entry is gracefully hidden.
+> If the extension cannot determine your balance or usage limit (e.g., unsupported provider, missing OpenCode workspace/auth info, or network issue), the status bar entry is gracefully hidden.
+
+### `/balance` Command
+
+Run `/balance` to open a grouped interactive configuration menu. You can:
+
+- View support status for configured providers
+- Open the **OpenCode Go** submenu and configure Workspace ID directly
+- Open the **Sub2Api** submenu and enable/disable user-defined Sub2Api providers
+- Enable or disable a provider in the status bar
+- Refresh the current status immediately
+
+You can also use command arguments directly:
+
+```bash
+/balance status
+/balance opencode-go
+/balance sub2api
+/balance enable opencode-go
+/balance disable deepseek
+/balance toggle sub2api
+```
+
+### Configuration Notes
+
+- **Provider display toggles** are saved by the `/balance` menu and apply on the next refresh.
+- **OpenCode Go** needs a dashboard workspace ID plus auth information. Set `OPENCODE_GO_WORKSPACE_ID` and `OPENCODE_GO_AUTH_COOKIE` / `OPENCODE_GO_AUTH_TOKEN`, configure the workspace ID in `/balance`, or provide model headers such as `x-opencode-workspace-id` and `x-opencode-auth`.
+- **Custom Sub2Api providers** are discovered from your pi model configuration and can be enabled or disabled individually from `/balance sub2api`.
+- Network requests time out quickly and failures are hidden from the status bar instead of interrupting your session.
 
 ## 🧠 How It Works
 
@@ -159,8 +191,8 @@ npm pack --dry-run
 Then create and push a tag that matches `package.json`:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Before pushing the tag, configure npm Trusted Publishing for this package:
