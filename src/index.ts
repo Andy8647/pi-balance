@@ -4,21 +4,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-type BalanceResult =
-  | {
-      kind?: "balance";
-      amount: number;
-      unit: string;
-    }
-  | {
-      kind: "usage";
-      entries: UsageEntry[];
-    };
-
-type UsageEntry = {
-  usageType: string;
-  percentage: number;
-  resetsIn: string;
+type BalanceResult = {
+  amount: number;
+  unit: string;
 };
 
 type BalanceFetcher = (
@@ -33,7 +21,7 @@ type FetchContext = {
   config: BalanceConfig;
 };
 
-type ProviderKey = "deepseek" | "sub2api" | "opencode-go";
+type ProviderKey = "deepseek" | "sub2api";
 
 type ProviderDefinition = {
   key: ProviderKey;
@@ -45,7 +33,6 @@ type ProviderDefinition = {
 type BalanceConfig = {
   disabledProviders: ProviderKey[];
   disabledSub2ApiProviders: string[];
-  opencodeGoWorkspaceId?: string;
 };
 
 type ProviderSupport = {
@@ -73,33 +60,13 @@ const PROVIDERS: readonly ProviderDefinition[] = [
     description: "Sub2Api /usage 剩余额度",
     enabledByDefault: true,
   },
-  {
-    key: "opencode-go",
-    label: "OpenCode Go",
-    description: "OpenCode Go dashboard usage 限额",
-    enabledByDefault: true,
-  },
 ];
 const PROVIDER_BY_KEY = new Map(PROVIDERS.map((provider) => [provider.key, provider]));
 
 const BALANCE_FETCHERS: readonly BalanceFetcher[] = [
-  tryOpenCodeGoUsage,
   tryDeepSeekBalance,
   trySub2ApiBalance,
 ];
-const OPENCODE_GO_ORIGIN = "https://opencode.ai";
-const OPENCODE_GO_USAGE_PATTERN =
-  /(Rolling|Weekly|Monthly)\s+Usage\s*(\d+)%\s*Resets\s+in\s*(.*?)(?=\s*(?:Rolling|Weekly|Monthly)\s+Usage|$)/gis;
-const OPENCODE_GO_WORKSPACE_ID_ENV_KEYS = [
-  "OPENCODE_GO_WORKSPACE_ID",
-  "OPENCODE_WORKSPACE_ID",
-] as const;
-const OPENCODE_GO_AUTH_ENV_KEYS = [
-  "OPENCODE_GO_AUTH_COOKIE",
-  "OPENCODE_GO_AUTH_TOKEN",
-  "OPENCODE_AUTH_COOKIE",
-  "OPENCODE_AUTH_TOKEN",
-] as const;
 
 export default function (pi: ExtensionAPI) {
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -177,7 +144,6 @@ export default function (pi: ExtensionAPI) {
         "enable",
         "disable",
         "toggle",
-        "opencode-go",
         "sub2api",
       ];
       const items = values
@@ -190,15 +156,6 @@ export default function (pi: ExtensionAPI) {
       const action = args.trim().toLowerCase();
 
       config = loadConfig(ctx);
-
-      if (action === "opencode-go") {
-        await openOpenCodeGoMenu(pi, ctx, config, async (nextConfig) => {
-          config = nextConfig;
-          persistConfig(pi, config);
-          await refreshBalance(ctx);
-        });
-        return;
-      }
 
       if (action === "sub2api") {
         await openSub2ApiMenu(pi, ctx, config, async (nextConfig) => {
@@ -290,14 +247,10 @@ function normalizeConfig(value: unknown): BalanceConfig {
   const disabledSub2ApiProviders = Array.isArray(record?.disabledSub2ApiProviders)
     ? record.disabledSub2ApiProviders.filter((provider): provider is string => typeof provider === "string")
     : [];
-  const opencodeGoWorkspaceId = typeof record?.opencodeGoWorkspaceId === "string"
-    ? normalizeWorkspaceId(record.opencodeGoWorkspaceId)
-    : undefined;
 
   return {
     disabledProviders: [...new Set(disabledProviders)],
     disabledSub2ApiProviders: [...new Set(disabledSub2ApiProviders)],
-    ...(opencodeGoWorkspaceId ? { opencodeGoWorkspaceId } : {}),
   };
 }
 
@@ -343,7 +296,6 @@ function setProviderEnabled(
 
 function getEnabledFetchers(config: BalanceConfig): BalanceFetcher[] {
   const fetchers: Array<[ProviderKey, BalanceFetcher]> = [
-    ["opencode-go", tryOpenCodeGoUsage],
     ["deepseek", tryDeepSeekBalance],
     ["sub2api", trySub2ApiBalance],
   ];
@@ -379,44 +331,39 @@ async function openBalanceMenu(
   config: BalanceConfig,
   onConfigChange: (config: BalanceConfig) => Promise<void>,
 ): Promise<void> {
-  let openCodeGoExpanded = false;
   let sub2ApiExpanded = false;
   let deepSeekExpanded = false;
 
   while (true) {
     const supports = await getProviderSupports(ctx, config);
-    const openCodeGoPrefix = openCodeGoExpanded ? "▼" : "▶";
     const sub2ApiPrefix = sub2ApiExpanded ? "▼" : "▶";
     const deepSeekPrefix = deepSeekExpanded ? "▼" : "▶";
-    const openCodeGoWorkspaceId = getConfiguredOpenCodeWorkspaceId(config);
-    const openCodeGoEnabled = isProviderEnabled(config, "opencode-go");
     const sub2ApiEnabled = isProviderEnabled(config, "sub2api");
     const deepSeekSupport = supports.find((support) => support.provider.key === "deepseek");
     const sub2ApiProviders = await getSub2ApiProviderCandidates(ctx);
+    const sub2ApiDisplayOption = `  ${formatEnabled(sub2ApiEnabled)} Display`;
+    const sub2ApiProviderOptions = new Map(
+      sub2ApiProviders.map((provider) => [
+        `  ${formatEnabled(isSub2ApiProviderEnabled(config, provider))} ${provider}`,
+        provider,
+      ]),
+    );
+    const deepSeekDisplayOption = deepSeekSupport
+      ? `  ${formatEnabled(deepSeekSupport.enabled)} Display`
+      : undefined;
     const options = [
-      `${openCodeGoPrefix} OpenCode Go`,
-      ...(openCodeGoExpanded
-        ? [
-            `  ${formatEnabled(openCodeGoEnabled)} Display`,
-            `  Workspace ID: ${openCodeGoWorkspaceId ? maskValue(openCodeGoWorkspaceId) : "not set"}`,
-          ]
-        : []),
       `${sub2ApiPrefix} Sub2Api`,
       ...(sub2ApiExpanded
         ? [
-            `  ${formatEnabled(sub2ApiEnabled)} Display`,
-            ...sub2ApiProviders.map(
-              (provider) => `  ${formatEnabled(isSub2ApiProviderEnabled(config, provider))} ${provider}`,
-            ),
+            sub2ApiDisplayOption,
+            ...sub2ApiProviderOptions.keys(),
           ]
         : []),
       ...(deepSeekSupport
         ? [
             `${deepSeekPrefix} DeepSeek`,
-            ...(deepSeekExpanded
-              ? [
-                  `  ${formatEnabled(deepSeekSupport.enabled)} Display`,
-                ]
+            ...(deepSeekExpanded && deepSeekDisplayOption
+              ? [deepSeekDisplayOption]
               : []),
           ]
         : []),
@@ -424,13 +371,6 @@ async function openBalanceMenu(
     ];
     const choice = await ctx.ui.select("pi-balance", options);
     if (!choice || choice === "Back") return;
-
-    const trimmedChoice = choice.trimStart();
-
-    if (choice === `${openCodeGoPrefix} OpenCode Go`) {
-      openCodeGoExpanded = !openCodeGoExpanded;
-      continue;
-    }
 
     if (choice === `${sub2ApiPrefix} Sub2Api`) {
       sub2ApiExpanded = !sub2ApiExpanded;
@@ -442,53 +382,25 @@ async function openBalanceMenu(
       continue;
     }
 
-    if (openCodeGoExpanded && trimmedChoice.includes("Display")) {
-      const nextConfig = setProviderEnabled(config, "opencode-go", !openCodeGoEnabled);
-      await onConfigChange(nextConfig);
-      config = nextConfig;
-      continue;
-    }
-
-    if (openCodeGoExpanded && trimmedChoice.startsWith("Workspace ID")) {
-      const nextWorkspaceId = await ctx.ui.input(
-        "OpenCode Go Workspace ID",
-        openCodeGoWorkspaceId ?? "从 https://opencode.ai/workspace/{id}/go 复制 id",
-      );
-      if (nextWorkspaceId === undefined) continue;
-
-      const normalized = normalizeWorkspaceId(nextWorkspaceId);
-      const nextConfig: BalanceConfig = {
-        ...config,
-        ...(normalized ? { opencodeGoWorkspaceId: normalized } : { opencodeGoWorkspaceId: undefined }),
-      };
-      await onConfigChange(nextConfig);
-      config = nextConfig;
-      ctx.ui.notify(normalized ? "Workspace ID saved" : "Workspace ID cleared", "info");
-      continue;
-    }
-
-    if (sub2ApiExpanded && trimmedChoice.includes("Display")) {
+    if (choice === sub2ApiDisplayOption) {
       const nextConfig = setProviderEnabled(config, "sub2api", !sub2ApiEnabled);
       await onConfigChange(nextConfig);
       config = nextConfig;
       continue;
     }
 
-    if (sub2ApiExpanded) {
-      const provider = sub2ApiProviders.find((candidate) => trimmedChoice.endsWith(candidate));
-      if (provider) {
-        const nextConfig = setSub2ApiProviderEnabled(
-          config,
-          provider,
-          !isSub2ApiProviderEnabled(config, provider),
-        );
-        await onConfigChange(nextConfig);
-        config = nextConfig;
-        continue;
-      }
+    const provider = sub2ApiProviderOptions.get(choice);
+    if (provider) {
+      const nextConfig = setSub2ApiProviderEnabled(
+        config,
+        provider,
+        !isSub2ApiProviderEnabled(config, provider),
+      );
+      await onConfigChange(nextConfig);
+      config = nextConfig;
+      continue;
     }
-
-    if (deepSeekExpanded && deepSeekSupport && trimmedChoice.includes("Display")) {
+    if (choice === deepSeekDisplayOption && deepSeekSupport) {
       const nextConfig = setProviderEnabled(config, "deepseek", !deepSeekSupport.enabled);
       await onConfigChange(nextConfig);
       config = nextConfig;
@@ -496,53 +408,6 @@ async function openBalanceMenu(
     }
   }
 }
-
-
-async function openOpenCodeGoMenu(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  config: BalanceConfig,
-  onConfigChange: (config: BalanceConfig) => Promise<void>,
-): Promise<void> {
-  while (true) {
-    const workspaceId = getConfiguredOpenCodeWorkspaceId(config);
-    const enabled = isProviderEnabled(config, "opencode-go");
-    const options = [
-      `${formatEnabled(enabled)} Display`,
-      `Workspace ID: ${workspaceId ? maskValue(workspaceId) : "not set"}`,
-      "Back",
-    ];
-    const choice = await ctx.ui.select("pi-balance / OpenCode Go", options);
-    if (!choice || choice === "Back") return;
-
-    if (choice.includes("Display")) {
-      const nextConfig = setProviderEnabled(config, "opencode-go", !enabled);
-      await onConfigChange(nextConfig);
-      config = nextConfig;
-      continue;
-    }
-
-    if (choice.startsWith("Workspace ID")) {
-      const nextWorkspaceId = await ctx.ui.input(
-        "OpenCode Go Workspace ID",
-        workspaceId ?? "从 https://opencode.ai/workspace/{id}/go 复制 id",
-      );
-      if (nextWorkspaceId === undefined) continue;
-
-      const normalized = normalizeWorkspaceId(nextWorkspaceId);
-      const nextConfig: BalanceConfig = {
-        ...config,
-        ...(normalized ? { opencodeGoWorkspaceId: normalized } : { opencodeGoWorkspaceId: undefined }),
-      };
-      await onConfigChange(nextConfig);
-      config = nextConfig;
-      ctx.ui.notify(normalized ? "Workspace ID saved" : "Workspace ID cleared", "info");
-      continue;
-    }
-
-  }
-}
-
 async function openSub2ApiMenu(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -551,25 +416,29 @@ async function openSub2ApiMenu(
 ): Promise<void> {
   while (true) {
     const providers = await getSub2ApiProviderCandidates(ctx);
+    const displayOption = `${formatEnabled(isProviderEnabled(config, "sub2api"))} Display`;
+    const providerOptions = new Map(
+      providers.map((provider) => [
+        `${formatEnabled(isSub2ApiProviderEnabled(config, provider))} ${provider}`,
+        provider,
+      ]),
+    );
     const options = [
-      `${formatEnabled(isProviderEnabled(config, "sub2api"))} Display`,
-      ...providers.map(
-        (provider) => `${formatEnabled(isSub2ApiProviderEnabled(config, provider))} ${provider}`,
-      ),
+      displayOption,
+      ...providerOptions.keys(),
       "Back",
     ];
     const choice = await ctx.ui.select("pi-balance / Sub2Api", options);
     if (!choice || choice === "Back") return;
 
-    if (choice.includes("Display")) {
+    if (choice === displayOption) {
       const nextConfig = setProviderEnabled(config, "sub2api", !isProviderEnabled(config, "sub2api"));
       await onConfigChange(nextConfig);
       config = nextConfig;
       continue;
     }
 
-
-    const provider = providers.find((candidate) => choice.endsWith(candidate));
+    const provider = providerOptions.get(choice);
     if (!provider) continue;
 
     const nextConfig = setSub2ApiProviderEnabled(
@@ -585,12 +454,6 @@ async function openSub2ApiMenu(
 function summarizeSupports(supports: ProviderSupport[]): string {
   const ready = supports.filter((support) => support.configured).length;
   return `${ready}/${supports.length} ready`;
-}
-
-function getOpenCodeGoBadge(config: BalanceConfig): string {
-  const enabled = isProviderEnabled(config, "opencode-go") ? "on" : "off";
-  const workspace = getConfiguredOpenCodeWorkspaceId(config) ? "workspace set" : "workspace not set";
-  return `${enabled}, ${workspace}`;
 }
 
 function formatEnabled(enabled: boolean): string {
@@ -684,13 +547,6 @@ async function getSub2ApiProviderCandidates(ctx: ExtensionContext): Promise<stri
   _validatedSub2ApiProviders = result;
   return result;
 }
-
-function maskValue(value: string): string {
-  if (value.length <= 8) return value;
-  return `${value.slice(0, 4)}…${value.slice(-4)}`;
-}
-
-
 async function buildSupportReport(ctx: ExtensionContext, config: BalanceConfig): Promise<string> {
   return formatSupportReport(await getProviderSupports(ctx, config));
 }
@@ -721,16 +577,6 @@ async function getProviderSupports(
       details.push("兼容 API 会在当前模型 baseUrl 上尝试 /usage 与 /v1/usage");
     }
 
-    if (provider.key === "opencode-go") {
-      const hasOpenCodeGoModel = modelProviders.has("opencode-go") ||
-        models.some((model) => isOpenCodeGoBaseUrl(normalizeBaseUrl(model.baseUrl) ?? ""));
-      const hasWorkspace = Boolean(getFirstEnv(OPENCODE_GO_WORKSPACE_ID_ENV_KEYS));
-      const hasAuth = Boolean(getFirstEnv(OPENCODE_GO_AUTH_ENV_KEYS)) || availableProviders.has("opencode-go");
-      configured = hasOpenCodeGoModel && hasWorkspace && hasAuth;
-      details.push(hasOpenCodeGoModel ? "已发现 OpenCode Go 模型" : "未发现 OpenCode Go 模型");
-      details.push(hasWorkspace ? "已配置 workspace ID" : "缺少 OPENCODE_GO_WORKSPACE_ID");
-      details.push(hasAuth ? "已配置 auth" : "缺少 OPENCODE_GO_AUTH_COOKIE / TOKEN");
-    }
 
     return {
       provider,
@@ -786,26 +632,6 @@ async function fetchProviderBalance(
   return undefined;
 }
 
-async function tryOpenCodeGoUsage(
-  context: FetchContext,
-  signal?: AbortSignal,
-): Promise<BalanceResult | undefined> {
-  const { baseUrl, headers, model } = context;
-  if (!isOpenCodeGoModel(model, baseUrl)) return undefined;
-
-  const workspaceId = getOpenCodeWorkspaceId(baseUrl) ?? getOpenCodeWorkspaceIdFromConfig(context.config, headers);
-  if (!workspaceId) return undefined;
-
-  const requestHeaders = buildOpenCodeHeaders(headers);
-  const html = await getText(
-    `${OPENCODE_GO_ORIGIN}/workspace/${encodeURIComponent(workspaceId)}/go`,
-    requestHeaders,
-    signal,
-  );
-  const entries = extractOpenCodeGoUsage(html);
-
-  return entries.length > 0 ? { kind: "usage", entries } : undefined;
-}
 
 async function tryDeepSeekBalance(
   context: FetchContext,
@@ -887,36 +713,6 @@ async function getJson(
   }
 }
 
-async function getText(
-  url: string,
-  headers: Record<string, string>,
-  parentSignal?: AbortSignal,
-): Promise<string | undefined> {
-  if (parentSignal?.aborted) return undefined;
-
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  const timeout = setTimeout(abort, REQUEST_TIMEOUT_MS);
-
-  parentSignal?.addEventListener("abort", abort, { once: true });
-
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers,
-      signal: controller.signal,
-    });
-
-    if (!response.ok) return undefined;
-
-    return await response.text();
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(timeout);
-    parentSignal?.removeEventListener("abort", abort);
-  }
-}
 
 function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   if (!baseUrl) return undefined;
@@ -943,171 +739,6 @@ function getSub2ApiUsageUrls(baseUrl: string): string[] {
   return [...new Set(urls)];
 }
 
-function isOpenCodeGoModel(model: Model<Api>, baseUrl: string): boolean {
-  return model.provider === "opencode-go" || isOpenCodeGoBaseUrl(baseUrl);
-}
-
-function isOpenCodeGoBaseUrl(baseUrl: string): boolean {
-  try {
-    const url = new URL(baseUrl);
-    const host = url.hostname.toLowerCase();
-    const path = url.pathname.toLowerCase();
-
-    return (host === "opencode.ai" || host.endsWith(".opencode.ai")) && path.includes("/go");
-  } catch {
-    return /(^|\.)opencode\.ai(?::|\/|$)/i.test(baseUrl) && /\/go(?:\/|$)/i.test(baseUrl);
-  }
-}
-
-function getOpenCodeWorkspaceId(baseUrl: string): string | undefined {
-  try {
-    const url = new URL(baseUrl);
-    const workspaceIndex = url.pathname.split("/").filter(Boolean).indexOf("workspace");
-    const workspaceId = workspaceIndex >= 0
-      ? url.pathname.split("/").filter(Boolean)[workspaceIndex + 1]
-      : undefined;
-
-    return normalizeWorkspaceId(workspaceId);
-  } catch {
-    const match = baseUrl.match(/\/workspace\/([^/?#]+)/i);
-    return normalizeWorkspaceId(match?.[1]);
-  }
-}
-
-function getOpenCodeWorkspaceIdFromConfig(
-  config: BalanceConfig,
-  headers: Record<string, string>,
-): string | undefined {
-  return normalizeWorkspaceId(
-    getHeader(headers, "x-opencode-workspace-id") ??
-      getHeader(headers, "x-workspace-id") ??
-      getHeader(headers, "opencode-workspace-id") ??
-      config.opencodeGoWorkspaceId ??
-      getFirstEnv(OPENCODE_GO_WORKSPACE_ID_ENV_KEYS),
-  );
-}
-
-function normalizeWorkspaceId(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function getConfiguredOpenCodeWorkspaceId(config: BalanceConfig): string | undefined {
-  return normalizeWorkspaceId(config.opencodeGoWorkspaceId) ?? getFirstEnv(OPENCODE_GO_WORKSPACE_ID_ENV_KEYS);
-}
-
-function buildOpenCodeHeaders(headers: Record<string, string>): Record<string, string> {
-  const authToken = getOpenCodeAuthToken(headers);
-  const cookie = mergeCookieAuth(getHeader(headers, "cookie"), authToken);
-  const requestHeaders: Record<string, string> = {
-    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    ...headers,
-  };
-
-  if (cookie) requestHeaders.Cookie = cookie;
-
-  deleteHeader(requestHeaders, "authorization");
-  deleteHeader(requestHeaders, "x-opencode-workspace-id");
-  deleteHeader(requestHeaders, "x-workspace-id");
-  deleteHeader(requestHeaders, "opencode-workspace-id");
-
-  return requestHeaders;
-}
-
-function getOpenCodeAuthToken(headers: Record<string, string>): string | undefined {
-  const explicitToken =
-    getHeader(headers, "x-opencode-auth") ??
-    getHeader(headers, "x-opencode-auth-token") ??
-    getHeader(headers, "opencode-auth") ??
-    getFirstEnv(OPENCODE_GO_AUTH_ENV_KEYS);
-  if (explicitToken) return trimAuthCookie(explicitToken);
-
-  const authorization = getHeader(headers, "authorization");
-  const bearer = authorization?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
-
-  return bearer || authorization?.trim();
-}
-
-function mergeCookieAuth(cookie: string | undefined, authToken: string | undefined): string | undefined {
-  const tokenCookieParts = authToken
-    ?.split(";")
-    .map((part) => part.trim())
-    .filter(Boolean) ?? [];
-  const explicitAuthCookie = tokenCookieParts.find((part) => /^auth=/i.test(part));
-  const localeCookie = tokenCookieParts.find((part) => /^oc_locale=/i.test(part));
-  const authValue = explicitAuthCookie?.replace(/^auth=/i, "") ?? authToken;
-  const parts = cookie
-    ?.split(";")
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((part) => !/^oc_locale=/i.test(part) && !/^auth=/i.test(part)) ?? [];
-
-  if (authValue) parts.push(`auth=${authValue}`);
-  parts.push(localeCookie ?? "oc_locale=en");
-
-  return parts.length > 0 ? parts.join("; ") : undefined;
-}
-
-function trimAuthCookie(value: string): string {
-  return value.trim().replace(/^auth=/i, "");
-}
-
-function getFirstEnv(keys: readonly string[]): string | undefined {
-  for (const key of keys) {
-    const value = process.env[key]?.trim();
-    if (value) return value;
-  }
-
-  return undefined;
-}
-
-function extractOpenCodeGoUsage(html: string | undefined): UsageEntry[] {
-  if (!html) return [];
-
-  const text = decodeHtmlEntities(stripHtml(html)).replace(/\s+/g, " ").trim();
-  const entries: UsageEntry[] = [];
-
-  for (const match of text.matchAll(OPENCODE_GO_USAGE_PATTERN)) {
-    const percentage = toNumber(match[2]);
-    if (percentage === undefined) continue;
-
-    entries.push({
-      usageType: match[1],
-      percentage,
-      resetsIn: match[3].trim(),
-    });
-  }
-
-  return entries;
-}
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ");
-}
-
-function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#(\d+);/g, (_match, codePoint: string) =>
-      String.fromCodePoint(Number(codePoint)),
-    )
-    .replace(/&#x([\da-f]+);/gi, (_match, codePoint: string) =>
-      String.fromCodePoint(Number.parseInt(codePoint, 16)),
-    );
-}
 
 function extractRemaining(value: unknown): number | undefined {
   const record = getRecord(value);
@@ -1141,22 +772,6 @@ function hasHeader(headers: Record<string, string>, headerName: string): boolean
   const normalizedHeaderName = headerName.toLowerCase();
   return Object.keys(headers).some((key) => key.toLowerCase() === normalizedHeaderName);
 }
-
-function getHeader(headers: Record<string, string>, headerName: string): string | undefined {
-  const normalizedHeaderName = headerName.toLowerCase();
-  const matchedKey = Object.keys(headers).find((key) => key.toLowerCase() === normalizedHeaderName);
-
-  return matchedKey ? headers[matchedKey] : undefined;
-}
-
-function deleteHeader(headers: Record<string, string>, headerName: string): void {
-  const normalizedHeaderName = headerName.toLowerCase();
-
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === normalizedHeaderName) delete headers[key];
-  }
-}
-
 function currencyToUnit(currency: string | undefined): string | undefined {
   switch (currency?.toUpperCase()) {
     case "CNY":
@@ -1169,22 +784,10 @@ function currencyToUnit(currency: string | undefined): string | undefined {
 }
 
 function formatBalance(result: BalanceResult): string {
-  if (result.kind === "usage") return formatUsage(result.entries);
-
   const amount = result.amount.toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 
   return result.unit === "$" ? `${result.unit}${amount}` : `${amount}${result.unit}`;
-}
-
-function formatUsage(entries: UsageEntry[]): string {
-  return entries
-    .map((entry) => `${entry.usageType} ${entry.percentage}%${formatResetsIn(entry.resetsIn)}`)
-    .join(" · ");
-}
-
-function formatResetsIn(resetsIn: string): string {
-  return resetsIn ? ` (${resetsIn})` : "";
 }
