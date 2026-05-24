@@ -70,6 +70,9 @@ const CODEX_STATUS_PREFIX = "📊 codex";
 const MAX_ERROR_BODY_CHARS = 600;
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 const SUB2API_PROBE_CACHE_TTL_MS = 60 * 1000;
+const MENU_UNAVAILABLE_COLOR = "\u001b[90m";
+const MENU_MUTED_COLOR = "\u001b[90m";
+const MENU_COLOR_RESET = "\u001b[39m";
 
 type CodexUsageReport = {
   source: "pi-auth" | "codex-app-server";
@@ -449,63 +452,88 @@ async function openBalanceMenu(
     const deepSeekPrefix = deepSeekExpanded ? "▼" : "▶";
     const codexPrefix = codexExpanded ? "▼" : "▶";
     const moonshotPrefix = moonshotExpanded ? "▼" : "▶";
-    const sub2ApiEnabled = isProviderEnabled(config, "sub2api");
+    const sub2ApiSupport = supports.find((support) => support.provider.key === "sub2api");
     const deepSeekSupport = supports.find((support) => support.provider.key === "deepseek");
+    const codexSupport = supports.find((support) => support.provider.key === "codex");
+    const moonshotSupport = supports.find((support) => support.provider.key === "moonshot");
+    const sub2ApiEnabled = sub2ApiSupport?.enabled ?? isProviderEnabled(config, "sub2api");
     const sub2ApiProviders = await getSub2ApiProviderCandidates(ctx);
-    const sub2ApiDisplayOption = `  ${formatEnabled(sub2ApiEnabled)} Display`;
+    const sub2ApiMenuOption = getProviderMenuOption(sub2ApiPrefix, "Sub2Api", sub2ApiSupport);
+    const deepSeekMenuOption = getProviderMenuOption(deepSeekPrefix, "DeepSeek", deepSeekSupport);
+    const codexMenuOption = getProviderMenuOption(codexPrefix, "OpenAI Codex", codexSupport);
+    const moonshotMenuOption = getProviderMenuOption(moonshotPrefix, "Moonshot", moonshotSupport);
+    const sub2ApiDisplayOption = getProviderActionOption(
+      "sub2api-display",
+      getProviderActionLabel(formatEnabled(sub2ApiEnabled), "Display", "Sub2Api"),
+      sub2ApiSupport,
+    );
     const sub2ApiProviderOptions = new Map(
       sub2ApiProviders.map((provider) => [
         `  ${formatEnabled(isSub2ApiProviderEnabled(config, provider))} ${provider}`,
         provider,
       ]),
     );
-    const deepSeekDisplayOption = deepSeekSupport
-      ? `  ${formatEnabled(deepSeekSupport.enabled)} Display`
-      : undefined;
-    const codexSupport = supports.find((support) => support.provider.key === "codex");
-    const codexDisplayOption = codexSupport
-      ? `  ${formatEnabled(codexSupport.enabled)} Display`
-      : undefined;
+    const deepSeekDisplayOption = getProviderActionOption(
+      "deepseek-display",
+      getProviderActionLabel(formatEnabled(deepSeekSupport?.enabled ?? false), "Display", "DeepSeek"),
+      deepSeekSupport,
+    );
+    const codexDisplayOption = getProviderActionOption(
+      "codex-display",
+      getProviderActionLabel(formatEnabled(codexSupport?.enabled ?? false), "Display", "OpenAI Codex"),
+      codexSupport,
+    );
     const codexFallbackOption = codexSupport
-      ? `  ${formatEnabled(config.codexAppServerFallback)} CLI fallback`
+      ? getProviderActionOption(
+          "codex-cli-fallback",
+          getProviderActionLabel(formatEnabled(config.codexAppServerFallback), "CLI fallback", "OpenAI Codex"),
+          codexSupport,
+        )
       : undefined;
-    const moonshotSupport = supports.find((support) => support.provider.key === "moonshot");
-    const moonshotDisplayOption = moonshotSupport
-      ? `  ${formatEnabled(moonshotSupport.enabled)} Display`
-      : undefined;
-    const options = [
-      "Refresh",
-      `${sub2ApiPrefix} Sub2Api`,
+    const moonshotDisplayOption = getProviderActionOption(
+      "moonshot-display",
+      getProviderActionLabel(formatEnabled(moonshotSupport?.enabled ?? false), "Display", "Moonshot"),
+      moonshotSupport,
+    );
+    const options: MenuOption[] = [
+      { label: "Refresh", value: "Refresh", choice: "Refresh" },
+      sub2ApiMenuOption,
       ...(sub2ApiExpanded
         ? [
             sub2ApiDisplayOption,
-            ...sub2ApiProviderOptions.keys(),
+            ...[...sub2ApiProviderOptions.keys()].map((label) => ({ label, value: label, choice: label })),
           ]
         : []),
-      ...(deepSeekSupport
-        ? [
-            `${deepSeekPrefix} DeepSeek`,
-            ...(deepSeekExpanded && deepSeekDisplayOption
-              ? [deepSeekDisplayOption]
-              : []),
-          ]
-        : []),
-      ...(codexSupport
-        ? [
-            `${codexPrefix} OpenAI Codex`,
-            ...(codexExpanded && codexDisplayOption ? [codexDisplayOption] : []),
-            ...(codexExpanded && codexFallbackOption ? [codexFallbackOption] : []),
-          ]
-        : []),
-      ...(moonshotSupport
-        ? [
-            `${moonshotPrefix} Moonshot`,
-            ...(moonshotExpanded && moonshotDisplayOption ? [moonshotDisplayOption] : []),
-          ]
-        : []),
-      "Back",
+      ...(
+        deepSeekSupport
+          ? [
+              deepSeekMenuOption,
+              ...(deepSeekExpanded ? [deepSeekDisplayOption] : []),
+            ]
+          : []
+      ),
+      ...(
+        codexSupport
+          ? [
+              codexMenuOption,
+              ...(codexExpanded ? [codexDisplayOption] : []),
+              ...(codexExpanded && codexFallbackOption ? [codexFallbackOption] : []),
+            ]
+          : []
+      ),
+      ...(
+        moonshotSupport
+          ? [
+              moonshotMenuOption,
+              ...(moonshotExpanded ? [moonshotDisplayOption] : []),
+            ]
+          : []
+      ),
+      { label: "Back", value: "Back", choice: "Back" },
     ];
-    const choice = await ctx.ui.select("pi-balance", options);
+    const optionChoices = new Map(options.map((option) => [option.value, option.choice]));
+    const choiceValue = await ctx.ui.select("pi-balance", options.map((option) => option.value));
+    const choice = choiceValue ? optionChoices.get(choiceValue) : undefined;
     if (!choice || choice === "Back") return;
 
     if (choice === "Refresh") {
@@ -513,27 +541,43 @@ async function openBalanceMenu(
       continue;
     }
 
-    if (choice === `${sub2ApiPrefix} Sub2Api`) {
-      sub2ApiExpanded = !sub2ApiExpanded;
+    if (choice === sub2ApiMenuOption.choice) {
+      const nextExpanded: boolean = !sub2ApiExpanded;
+      sub2ApiExpanded = nextExpanded;
+      deepSeekExpanded = false;
+      codexExpanded = false;
+      moonshotExpanded = false;
       continue;
     }
 
-    if (choice === `${deepSeekPrefix} DeepSeek`) {
-      deepSeekExpanded = !deepSeekExpanded;
+    if (choice === deepSeekMenuOption.choice) {
+      const nextExpanded: boolean = !deepSeekExpanded;
+      sub2ApiExpanded = false;
+      deepSeekExpanded = nextExpanded;
+      codexExpanded = false;
+      moonshotExpanded = false;
       continue;
     }
 
-    if (choice === `${codexPrefix} OpenAI Codex`) {
-      codexExpanded = !codexExpanded;
+    if (choice === codexMenuOption.choice) {
+      const nextExpanded: boolean = !codexExpanded;
+      sub2ApiExpanded = false;
+      deepSeekExpanded = false;
+      codexExpanded = nextExpanded;
+      moonshotExpanded = false;
       continue;
     }
 
-    if (choice === `${moonshotPrefix} Moonshot`) {
-      moonshotExpanded = !moonshotExpanded;
+    if (choice === moonshotMenuOption.choice) {
+      const nextExpanded: boolean = !moonshotExpanded;
+      sub2ApiExpanded = false;
+      deepSeekExpanded = false;
+      codexExpanded = false;
+      moonshotExpanded = nextExpanded;
       continue;
     }
 
-    if (choice === sub2ApiDisplayOption) {
+    if (choice === sub2ApiDisplayOption.choice && sub2ApiSupport?.configured) {
       const nextConfig = setProviderEnabled(config, "sub2api", !sub2ApiEnabled);
       await onConfigChange(nextConfig);
       config = nextConfig;
@@ -551,28 +595,28 @@ async function openBalanceMenu(
       config = nextConfig;
       continue;
     }
-    if (choice === deepSeekDisplayOption && deepSeekSupport) {
+    if (choice === deepSeekDisplayOption.choice && deepSeekSupport?.configured) {
       const nextConfig = setProviderEnabled(config, "deepseek", !deepSeekSupport.enabled);
       await onConfigChange(nextConfig);
       config = nextConfig;
       continue;
     }
 
-    if (choice === codexDisplayOption && codexSupport) {
+    if (choice === codexDisplayOption.choice && codexSupport?.configured) {
       const nextConfig = setProviderEnabled(config, "codex", !codexSupport.enabled);
       await onConfigChange(nextConfig);
       config = nextConfig;
       continue;
     }
 
-    if (choice === moonshotDisplayOption && moonshotSupport) {
+    if (choice === moonshotDisplayOption.choice && moonshotSupport?.configured) {
       const nextConfig = setProviderEnabled(config, "moonshot", !moonshotSupport.enabled);
       await onConfigChange(nextConfig);
       config = nextConfig;
       continue;
     }
 
-    if (choice === codexFallbackOption && codexSupport) {
+    if (codexFallbackOption && choice === codexFallbackOption.choice && codexSupport?.configured) {
       const nextConfig = { ...config, codexAppServerFallback: !config.codexAppServerFallback };
       await onConfigChange(nextConfig);
       config = nextConfig;
@@ -637,6 +681,55 @@ function summarizeSupports(supports: ProviderSupport[]): string {
 
 function formatEnabled(enabled: boolean): string {
   return enabled ? "◉" : "○";
+}
+
+type MenuOption = {
+  label: string;
+  value: string;
+  choice: string;
+};
+
+function formatUnavailableMenuLabel(label: string): string {
+  return `${MENU_UNAVAILABLE_COLOR}${label}${MENU_COLOR_RESET}`;
+}
+
+function formatMutedMenuText(text: string): string {
+  return `${MENU_MUTED_COLOR}${text}${MENU_COLOR_RESET}`;
+}
+
+function getProviderActionLabel(icon: string, action: string, provider: string): string {
+  return `  ${icon} ${action}${formatMutedMenuText(` - ${provider}`)}`;
+}
+
+function getProviderUnavailableReason(support: ProviderSupport | undefined): string {
+  if (!support) return "未就绪";
+  const unavailableDetail = support.details.find((detail) => detail.includes("不可用") || detail.includes("未发现"));
+  return unavailableDetail ?? "未就绪";
+}
+
+function getProviderMenuText(prefix: string, label: string, support: ProviderSupport | undefined): string {
+  const configured = support?.configured ?? false;
+  const suffix = configured ? "" : ` (${getProviderUnavailableReason(support)})`;
+  return `${prefix} ${label}${suffix}`;
+}
+
+function getProviderMenuOption(prefix: string, label: string, support: ProviderSupport | undefined): MenuOption {
+  const text = getProviderMenuText(prefix, label, support);
+  const labelText = support?.configured ?? false ? text : formatUnavailableMenuLabel(text);
+  return {
+    choice: text,
+    label: labelText,
+    value: labelText,
+  };
+}
+
+function getProviderActionOption(choice: string, label: string, support: ProviderSupport | undefined): MenuOption {
+  const labelText = support?.configured ?? false ? label : formatUnavailableMenuLabel(label);
+  return {
+    choice,
+    label: labelText,
+    value: labelText,
+  };
 }
 
 async function getSub2ApiBadge(ctx: ExtensionContext, config: BalanceConfig): Promise<string> {
@@ -750,9 +843,12 @@ async function getProviderSupports(
   config: BalanceConfig,
 ): Promise<ProviderSupport[]> {
   const models = ctx.modelRegistry.getAll();
-  const availableProviders = new Set(ctx.modelRegistry.getAvailable().map((model) => model.provider));
+  const availableModels = ctx.modelRegistry.getAvailable();
+  const availableProviders = new Set(availableModels.map((model) => model.provider));
   const currentBaseUrl = normalizeBaseUrl(ctx.model?.baseUrl);
-  const modelProviders = new Set(models.map((model) => model.provider));
+  const currentModelAvailable = Boolean(
+    ctx.model && availableModels.some((model) => model.provider === ctx.model?.provider && model.id === ctx.model?.id),
+  );
 
   return PROVIDERS.map((provider) => {
     const details: string[] = [];
@@ -760,21 +856,26 @@ async function getProviderSupports(
 
     if (provider.key === "deepseek") {
       const hasDeepSeekModel = models.some((model) =>
-        normalizeBaseUrl(model.baseUrl)?.includes("deepseek.com"),
+        model.provider === "deepseek" || normalizeBaseUrl(model.baseUrl)?.includes("deepseek.com"),
       );
-      configured = availableProviders.has("deepseek") || hasDeepSeekModel;
+      configured = availableModels.some((model) =>
+        model.provider === "deepseek" || normalizeBaseUrl(model.baseUrl)?.includes("deepseek.com"),
+      );
       details.push(hasDeepSeekModel ? "已发现 DeepSeek 模型" : "未发现 DeepSeek 模型");
+      details.push(configured ? "DeepSeek 认证可用" : "DeepSeek 认证不可用");
     }
 
     if (provider.key === "sub2api") {
-      configured = Boolean(currentBaseUrl) || modelProviders.size > 0;
+      configured = Boolean(currentBaseUrl && currentModelAvailable) || availableModels.length > 0;
       details.push("兼容 API 会在当前模型 baseUrl 上尝试 /usage 与 /v1/usage");
+      details.push(configured ? "至少一个模型认证可用" : "未发现可用模型认证");
     }
 
     if (provider.key === "codex") {
       const hasCodexModel = models.some((model) => model.provider === CODEX_PROVIDER_ID);
-      configured = availableProviders.has(CODEX_PROVIDER_ID) || hasCodexModel;
+      configured = availableProviders.has(CODEX_PROVIDER_ID);
       details.push(hasCodexModel ? "已发现 OpenAI Codex 模型" : "未发现 OpenAI Codex 模型");
+      details.push(configured ? "OpenAI Codex 认证可用" : "OpenAI Codex 认证不可用");
       details.push(
         config.codexAppServerFallback
           ? "会优先复用 Pi 的 Codex 订阅认证，必要时回退到 codex app-server"
@@ -783,10 +884,13 @@ async function getProviderSupports(
     }
     if (provider.key === "moonshot") {
       const hasMoonshotModel = models.some((model) =>
-        normalizeBaseUrl(model.baseUrl)?.includes("moonshot.cn"),
+        model.provider === "moonshot" || normalizeBaseUrl(model.baseUrl)?.includes("moonshot.cn"),
       );
-      configured = availableProviders.has("moonshot") || hasMoonshotModel;
+      configured = availableModels.some((model) =>
+        model.provider === "moonshot" || normalizeBaseUrl(model.baseUrl)?.includes("moonshot.cn"),
+      );
       details.push(hasMoonshotModel ? "已发现 Moonshot 模型" : "未发现 Moonshot 模型");
+      details.push(configured ? "Moonshot 认证可用" : "Moonshot 认证不可用");
     }
 
 
