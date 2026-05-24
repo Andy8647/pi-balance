@@ -27,7 +27,7 @@ type FetchContext = {
   config: BalanceConfig;
 };
 
-type ProviderKey = "deepseek" | "sub2api" | "codex";
+type ProviderKey = "deepseek" | "sub2api" | "codex" | "moonshot";
 
 type ProviderDefinition = {
   key: ProviderKey;
@@ -127,11 +127,18 @@ const PROVIDERS: readonly ProviderDefinition[] = [
     description: "OpenAI Codex ChatGPT 订阅用量",
     enabledByDefault: true,
   },
+  {
+    key: "moonshot",
+    label: "Moonshot",
+    description: "Moonshot /v1/users/me/balance 余额",
+    enabledByDefault: true,
+  },
 ];
 const PROVIDER_BY_KEY = new Map(PROVIDERS.map((provider) => [provider.key, provider]));
 
 const BALANCE_FETCHERS: readonly BalanceFetcherEntry[] = [
   { provider: "deepseek", fetcher: tryDeepSeekBalance },
+  { provider: "moonshot", fetcher: tryMoonshotBalance },
   { provider: "sub2api", fetcher: trySub2ApiBalance },
   { provider: "codex", fetcher: tryCodexUsage },
 ];
@@ -399,6 +406,9 @@ function shouldTryProvider(provider: ProviderKey, model: Model<Api>, baseUrl: st
   if (provider === "deepseek") {
     return model.provider === "deepseek" || getProviderRootUrl(baseUrl).includes("deepseek.com");
   }
+  if (provider === "moonshot") {
+    return model.provider === "moonshot" || getProviderRootUrl(baseUrl).includes("moonshot.cn");
+  }
   return true;
 }
 
@@ -431,12 +441,14 @@ async function openBalanceMenu(
   let sub2ApiExpanded = false;
   let deepSeekExpanded = false;
   let codexExpanded = false;
+  let moonshotExpanded = false;
 
   while (true) {
     const supports = await getProviderSupports(ctx, config);
     const sub2ApiPrefix = sub2ApiExpanded ? "▼" : "▶";
     const deepSeekPrefix = deepSeekExpanded ? "▼" : "▶";
     const codexPrefix = codexExpanded ? "▼" : "▶";
+    const moonshotPrefix = moonshotExpanded ? "▼" : "▶";
     const sub2ApiEnabled = isProviderEnabled(config, "sub2api");
     const deepSeekSupport = supports.find((support) => support.provider.key === "deepseek");
     const sub2ApiProviders = await getSub2ApiProviderCandidates(ctx);
@@ -456,6 +468,10 @@ async function openBalanceMenu(
       : undefined;
     const codexFallbackOption = codexSupport
       ? `  ${formatEnabled(config.codexAppServerFallback)} CLI fallback`
+      : undefined;
+    const moonshotSupport = supports.find((support) => support.provider.key === "moonshot");
+    const moonshotDisplayOption = moonshotSupport
+      ? `  ${formatEnabled(moonshotSupport.enabled)} Display`
       : undefined;
     const options = [
       "Refresh",
@@ -481,6 +497,12 @@ async function openBalanceMenu(
             ...(codexExpanded && codexFallbackOption ? [codexFallbackOption] : []),
           ]
         : []),
+      ...(moonshotSupport
+        ? [
+            `${moonshotPrefix} Moonshot`,
+            ...(moonshotExpanded && moonshotDisplayOption ? [moonshotDisplayOption] : []),
+          ]
+        : []),
       "Back",
     ];
     const choice = await ctx.ui.select("pi-balance", options);
@@ -503,6 +525,11 @@ async function openBalanceMenu(
 
     if (choice === `${codexPrefix} OpenAI Codex`) {
       codexExpanded = !codexExpanded;
+      continue;
+    }
+
+    if (choice === `${moonshotPrefix} Moonshot`) {
+      moonshotExpanded = !moonshotExpanded;
       continue;
     }
 
@@ -533,6 +560,13 @@ async function openBalanceMenu(
 
     if (choice === codexDisplayOption && codexSupport) {
       const nextConfig = setProviderEnabled(config, "codex", !codexSupport.enabled);
+      await onConfigChange(nextConfig);
+      config = nextConfig;
+      continue;
+    }
+
+    if (choice === moonshotDisplayOption && moonshotSupport) {
+      const nextConfig = setProviderEnabled(config, "moonshot", !moonshotSupport.enabled);
       await onConfigChange(nextConfig);
       config = nextConfig;
       continue;
@@ -747,6 +781,13 @@ async function getProviderSupports(
           : "会仅复用 Pi 的 Codex 订阅认证；codex app-server 回退已关闭",
       );
     }
+    if (provider.key === "moonshot") {
+      const hasMoonshotModel = models.some((model) =>
+        normalizeBaseUrl(model.baseUrl)?.includes("moonshot.cn"),
+      );
+      configured = availableProviders.has("moonshot") || hasMoonshotModel;
+      details.push(hasMoonshotModel ? "已发现 Moonshot 模型" : "未发现 Moonshot 模型");
+    }
 
 
     return {
@@ -866,6 +907,18 @@ async function tryCodexUsage(
       : undefined);
 
   return report ? { text: formatCodexUsageStatusline(report, context.model) } : undefined;
+}
+
+async function tryMoonshotBalance(
+  context: FetchContext,
+  signal?: AbortSignal,
+): Promise<BalanceResult | undefined> {
+  const { baseUrl, headers } = context;
+  const data = await getJson(`${getProviderRootUrl(baseUrl)}/v1/users/me/balance`, headers, signal);
+  const amount = extractMoonshotAvailableBalance(data);
+  if (amount === undefined) return undefined;
+
+  return { amount, unit: "¥" };
 }
 
 async function queryCodexUsageViaPiAuth(
@@ -1417,6 +1470,14 @@ export function extractRemaining(value: unknown): number | undefined {
     toNumber(getRecord(record.data)?.remaining) ??
     toNumber(getRecord(record.usage)?.remaining)
   );
+}
+
+export function extractMoonshotAvailableBalance(value: unknown): number | undefined {
+  const payload = getRecord(value);
+  if (!payload) return undefined;
+  if (toNumber(payload.code) !== 0 || payload.status !== true) return undefined;
+
+  return toNumber(getRecord(payload.data)?.available_balance);
 }
 
 function getRecord(value: unknown): Record<string, unknown> | undefined {

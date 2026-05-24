@@ -33,7 +33,7 @@ pi-balance 是 [pi 编码代理](https://github.com/earendil-works/pi-coding-age
 - ✅ **自动识别**当前使用的模型提供商
 - ✅ **实时显示**余额 —— 每 **5 分钟**自动刷新
 - ✅ **切换即更新**—— 切换模型或提供商时立即刷新
-- ✅ **多提供商支持** —— DeepSeek、Sub2Api、OpenAI Codex 及兼容 API
+- ✅ **多提供商支持** —— DeepSeek、Moonshot/Kimi、Sub2Api、OpenAI Codex 及兼容 API
 - ✅ **余额接口零配置** —— 支持的余额接口可复用模型 headers
 - ✅ **优雅降级** —— 无法获取余额时自动隐藏，不干扰使用
 
@@ -70,6 +70,7 @@ pi install ./
 | 提供商 | 余额接口 | 显示内容 |
 |----------|-----------------|----------|
 | **DeepSeek** | `/user/balance` | ¥（人民币）余额 |
+| **Moonshot / Kimi** | `/v1/users/me/balance` | ¥（人民币）可用余额 |
 | **Sub2Api** | `/usage` | $（美元）剩余额度 |
 | **兼容 API** | `/usage`、`/v1/usage` | $（美元）剩余额度 |
 | **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5 小时与每周用量剩余额度 |
@@ -112,6 +113,7 @@ DeepSeek: ¥49.87
 /balance disable deepseek
 /balance toggle sub2api
 /balance toggle codex
+/balance toggle moonshot
 ```
 
 ### 配置说明

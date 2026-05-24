@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   extractRemaining,
+  extractMoonshotAvailableBalance,
   formatCodexUsageStatusline,
   getSub2ApiUsageUrls,
   normalizeAppServerResponse,
@@ -26,6 +27,23 @@ test("extractRemaining supports common Sub2Api response shapes", () => {
   assert.equal(extractRemaining({ data: { remaining: 3 } }), 3);
   assert.equal(extractRemaining({ usage: { remaining: "9" } }), 9);
   assert.equal(extractRemaining({ usage: { used: 9 } }), undefined);
+});
+
+test("extractMoonshotAvailableBalance parses Kimi balance response", () => {
+  assert.equal(
+    extractMoonshotAvailableBalance({
+      code: 0,
+      data: {
+        available_balance: 49.58894,
+        voucher_balance: 46.58893,
+        cash_balance: 3.00001,
+      },
+      scode: "0x0",
+      status: true,
+    }),
+    49.58894,
+  );
+  assert.equal(extractMoonshotAvailableBalance({ code: 1, status: false, data: {} }), undefined);
 });
 
 test("normalizeBackendPayload parses backend rate limits and credits", () => {

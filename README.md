@@ -33,7 +33,7 @@ pi-balance is an **extension** for the [pi coding agent](https://github.com/eare
 - ✅ **Auto-detects** your currently active model provider
 - ✅ **Real-time** balance display — refreshes every **5 minutes**
 - ✅ **Live updates** on provider/model switch
-- ✅ **Multi-provider support** — DeepSeek, Sub2Api, OpenAI Codex (and compatible APIs)
+- ✅ **Multi-provider support** — DeepSeek, Moonshot/Kimi, Sub2Api, OpenAI Codex (and compatible APIs)
 - ✅ **Zero configuration for balance APIs** — supported balance APIs work from existing model headers
 - ✅ **Graceful fallback** — quietly hides when balance info is unavailable
 
@@ -70,6 +70,7 @@ Restart pi. You should see the balance indicator appear in the status bar once y
 | Provider | Balance Endpoint | Display |
 |----------|--------------------------|---------|
 | **DeepSeek** | `/user/balance` | ¥ (CNY) balance |
+| **Moonshot / Kimi** | `/v1/users/me/balance` | ¥ (CNY) available balance |
 | **Sub2Api** | `/usage` | $ (USD) remaining balance |
 | **Compatible APIs** | `/usage`, `/v1/usage` | $ (USD) remaining balance |
 | **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5-hour and weekly usage remaining |
@@ -112,6 +113,7 @@ You can also use command arguments directly:
 /balance disable deepseek
 /balance toggle sub2api
 /balance toggle codex
+/balance toggle moonshot
 ```
 
 ### Configuration Notes
