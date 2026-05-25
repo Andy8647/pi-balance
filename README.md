@@ -31,7 +31,7 @@
 pi-balance is an **extension** for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent) that automatically fetches and displays your AI provider's API credit balance in the pi **status bar**.
 
 - ✅ **Auto-detects** your currently active model provider
-- ✅ **Real-time** balance display — refreshes every **5 minutes**
+- ✅ **Event-driven refresh** — balance updates automatically after each conversation (with delta display ▲▼)
 - ✅ **Live updates** on provider/model switch
 - ✅ **Multi-provider support** — DeepSeek, Moonshot/Kimi, OpenRouter, Sub2Api, OpenAI Codex (and compatible APIs)
 - ✅ **Zero configuration for balance APIs** — supported balance APIs work from existing model headers
@@ -86,7 +86,7 @@ Once installed, pi-balance works **completely automatically**:
 
 1. **On session start** — it fetches your balance immediately
 2. **On model switch** — it re-fetches for the new provider
-3. **Auto-refresh** — balances are refreshed every **5 minutes**
+3. **After each conversation** (`agent_end`) — automatically refreshes and shows balance delta (▲▼)
 
 The balance is displayed in the **status bar** at the bottom of your pi terminal:
 
@@ -146,7 +146,7 @@ You can also use command arguments directly:
 │  ┌─ Extension: pi-balance ───────────────────────────────┐  │
 │  │  session_start  ──►  fetchBalance()  ──►  setStatus() │  │
 │  │  model_select   ──►  fetchBalance()  ──►  setStatus() │  │
-│  │  5-min timer   ────►  refreshBalance()                 │  │
+│  │  agent_end     ────►  refreshBalance(showDelta)        │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -155,7 +155,8 @@ You can also use command arguments directly:
 
 - **`session_start`** — initial balance fetch when a session begins
 - **`model_select`** — re-fetch when you switch models/providers
-- **`session_shutdown`** — cleanup timers and clear status
+- **`agent_end`** — refresh balance after each conversation, showing delta (▲▼)
+- **`session_shutdown`** — cleanup and clear status
 
 ## 🏗️ Project Structure
 
