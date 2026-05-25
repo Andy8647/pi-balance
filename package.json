@@ -50,7 +50,7 @@
     "image": "https://img.dog/file/1779542581467_mzRI9XShNB2pFCVDlx1f8.webp"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
