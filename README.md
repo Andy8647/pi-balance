@@ -97,31 +97,34 @@ DeepSeek: ¥49.87
 
 ### `/balance` Command
 
-Run `/balance` to open a grouped interactive configuration menu. You can:
+Run `/balance` to open an interactive configuration menu. You can:
 
 - View support status for configured providers
-- Open the **Sub2Api** submenu and enable/disable user-defined Sub2Api providers
-- Enable or disable a provider in the status bar
+- Expand/collapse providers to toggle display and extra options
+- Enable/disable **Sub2Api** sub-providers inline (with auto-discovery)
+- Toggle **Codex CLI fallback** on/off
 - Refresh the current status immediately
 
 You can also use command arguments directly:
 
 ```bash
 /balance status
-/balance sub2api
 /balance refresh
-/balance sub2api rescan
-/balance disable deepseek
-/balance toggle sub2api
+/balance enable deepseek
+/balance disable moonshot
 /balance toggle codex
-/balance toggle moonshot
+/balance toggle openrouter
+/balance toggle sub2api
+/balance sub2api               # Open Sub2Api sub-provider menu
+/balance sub2api rescan         # Re-scan for new Sub2Api providers
 ```
 
 ### Configuration Notes
 
 - **Provider display toggles** are saved by the `/balance` menu and apply on the next refresh.
-- **Custom Sub2Api providers** are discovered from your pi model configuration and can be enabled or disabled individually from `/balance sub2api`. Use `/balance sub2api rescan` or the submenu's **Rescan providers** item after changing model configuration.
+- **Custom Sub2Api providers** are discovered from your pi model configuration (`~/.pi/agent/models.json`) and can be enabled/disabled individually from the main menu or `/balance sub2api`. Use `/balance sub2api rescan` after changing model configuration.
 - **OpenAI Codex usage** is shown only while the active model provider is `openai-codex`. The extension first reuses pi's Codex subscription auth headers and can fall back to `codex app-server --listen stdio://` when available; the CLI fallback can be toggled in the `/balance` menu.
+- The menu caches support states intelligently: expanding/collapsing providers is instant (no recomputation), while config changes trigger automatic refresh.
 - Network requests time out quickly and failures are hidden from the status bar instead of interrupting your session.
 
 ## 🧠 How It Works
@@ -156,7 +159,21 @@ You can also use command arguments directly:
 ```
 pi-balance/
 ├── src/
-│   └── index.ts                  # Main extension source
+│   ├── index.ts                  # Entry point, commands, lifecycle
+│   ├── types.ts                   # Type definitions and constants
+│   ├── config.ts                  # Config load/persist/toggle
+│   ├── utils.ts                   # Helpers (fetch, JSON, type guards)
+│   ├── menu.ts                    # Dynamic menu builder with caching
+│   └── providers/
+│       ├── types.ts               # BalanceProvider interface
+│       ├── registry.ts            # Singleton provider registry
+│       ├── deepseek.ts            # DeepSeek provider
+│       ├── moonshot.ts            # Moonshot/Kimi provider
+│       ├── openrouter.ts          # OpenRouter provider
+│       ├── sub2api.ts             # Sub2Api + auto-discovery
+│       └── codex.ts               # OpenAI Codex + CLI fallback
+├── tests/
+│   └── index.test.ts
 ├── LICENSE                       # MIT license
 ├── README.md                     # English documentation
 ├── README.zh-CN.md               # Chinese documentation
@@ -177,6 +194,12 @@ npm run typecheck
 
 ```bash
 npm run build
+```
+
+### Test
+
+```bash
+npm test
 ```
 
 ### Publish Checklist
@@ -206,18 +229,63 @@ Before pushing the tag, configure npm Trusted Publishing for this package:
 
 ### Adding a New Provider
 
-The extension is designed to be easily extensible. To add support for a new provider, implement a balance fetcher function following the pattern of `tryDeepSeekBalance` or `trySub2ApiBalance`, then add it to `getEnabledFetchers`.
+The extension uses a pluggable provider architecture. To add support for a new provider, create a module in `src/providers/` that implements the `BalanceProvider` interface, then import it in `src/index.ts` to trigger auto-registration:
 
 ```typescript
-async function tryYourProviderBalance(
-  baseUrl: string,
-  headers: Record<string, string>,
-): Promise<BalanceResult | undefined> {
-  const data = await getJson(`${baseUrl}/your/endpoint`, headers);
-  const amount = extractSomeField(data);
-  return amount !== undefined ? { amount, unit: "$" } : undefined;
-}
+// src/providers/yourprovider.ts
+import type { BalanceProvider } from "./types.js";
+import { registry } from "./registry.js";
+import type {
+  BalanceResult,
+  BalanceConfig,
+  FetchContext,
+  ProviderSupport,
+} from "../types.js";
+import { getJson } from "../utils.js";
+
+export const yourProvider: BalanceProvider = {
+  key: "yourprovider",
+  definition: {
+    key: "yourprovider",
+    label: "YourProvider",
+    color: "#FFD700",
+  },
+
+  shouldTry(model, baseUrl) {
+    return baseUrl.includes("yourprovider.com");
+  },
+
+  async fetchBalance(
+    ctx: FetchContext,
+    signal?: AbortSignal,
+  ): Promise<BalanceResult | undefined> {
+    const data = await getJson(`${ctx.baseUrl}/your/endpoint`, ctx.headers, signal);
+    const amount = data?.credits_remaining;
+    return typeof amount === "number" ? { amount, unit: "$" } : undefined;
+  },
+
+  async getSupport(
+    ctx: ExtensionContext,
+    config: BalanceConfig,
+  ): Promise<ProviderSupport> {
+    return {
+      provider: this.definition,
+      configured: true,
+      details: ["Configured"],
+    };
+  },
+};
+
+registry.register(yourProvider);
 ```
+
+Then add one import in `src/index.ts`:
+
+```typescript
+import "./providers/yourprovider.js";
+```
+
+That's it — the provider auto-registers, appears in the `/balance` menu, and participates in balance fetching. No other code changes needed.
 
 ## 📄 License
 
