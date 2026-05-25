@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   extractRemaining,
   extractMoonshotAvailableBalance,
+  extractOpenRouterRemaining,
   formatCodexUsageStatusline,
   getSub2ApiUsageUrls,
   normalizeAppServerResponse,
@@ -162,4 +163,21 @@ test("formatCodexUsageStatusline formats remaining percentage and credits fallba
   );
   assert.ok(creditsReport);
   assert.equal(formatCodexUsageStatusline(creditsReport), "📊 codex 12.35 credits");
+});
+
+test("extractOpenRouterRemaining should compute remaining from total_credits minus total_usage", () => {
+  const payload = {
+    data: { total_credits: 100.0, total_usage: 35.25 },
+  };
+  const remaining = extractOpenRouterRemaining(payload);
+  assert.equal(remaining, 64.75);
+});
+
+test("extractOpenRouterRemaining should return undefined when data is missing", () => {
+  assert.equal(extractOpenRouterRemaining({}), undefined);
+  assert.equal(extractOpenRouterRemaining({ data: {} }), undefined);
+  assert.equal(extractOpenRouterRemaining({ data: { total_credits: 100 } }), undefined);
+  assert.equal(extractOpenRouterRemaining({ data: { total_usage: 50 } }), undefined);
+  assert.equal(extractOpenRouterRemaining(undefined), undefined);
+  assert.equal(extractOpenRouterRemaining(null), undefined);
 });

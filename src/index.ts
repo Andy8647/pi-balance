@@ -27,7 +27,7 @@ type FetchContext = {
   config: BalanceConfig;
 };
 
-type ProviderKey = "deepseek" | "sub2api" | "codex" | "moonshot";
+type ProviderKey = "deepseek" | "sub2api" | "codex" | "moonshot" | "openrouter";
 
 type ProviderDefinition = {
   key: ProviderKey;
@@ -136,12 +136,19 @@ const PROVIDERS: readonly ProviderDefinition[] = [
     description: "Moonshot /v1/users/me/balance 余额",
     enabledByDefault: true,
   },
+  {
+    key: "openrouter",
+    label: "OpenRouter",
+    description: "OpenRouter /credits 剩余额度",
+    enabledByDefault: true,
+  },
 ];
 const PROVIDER_BY_KEY = new Map(PROVIDERS.map((provider) => [provider.key, provider]));
 
 const BALANCE_FETCHERS: readonly BalanceFetcherEntry[] = [
   { provider: "deepseek", fetcher: tryDeepSeekBalance },
   { provider: "moonshot", fetcher: tryMoonshotBalance },
+  { provider: "openrouter", fetcher: tryOpenRouterBalance },
   { provider: "sub2api", fetcher: trySub2ApiBalance },
   { provider: "codex", fetcher: tryCodexUsage },
 ];
@@ -412,6 +419,9 @@ function shouldTryProvider(provider: ProviderKey, model: Model<Api>, baseUrl: st
   if (provider === "moonshot") {
     return model.provider === "moonshot" || getProviderRootUrl(baseUrl).includes("moonshot.cn");
   }
+  if (provider === "openrouter") {
+    return model.provider === "openrouter" || baseUrl.includes("openrouter.ai");
+  }
   return true;
 }
 
@@ -445,6 +455,7 @@ async function openBalanceMenu(
   let deepSeekExpanded = false;
   let codexExpanded = false;
   let moonshotExpanded = false;
+  let openRouterExpanded = false;
 
   while (true) {
     const supports = await getProviderSupports(ctx, config);
@@ -452,16 +463,24 @@ async function openBalanceMenu(
     const deepSeekPrefix = deepSeekExpanded ? "▼" : "▶";
     const codexPrefix = codexExpanded ? "▼" : "▶";
     const moonshotPrefix = moonshotExpanded ? "▼" : "▶";
+    const openRouterPrefix = openRouterExpanded ? "▼" : "▶";
     const sub2ApiSupport = supports.find((support) => support.provider.key === "sub2api");
     const deepSeekSupport = supports.find((support) => support.provider.key === "deepseek");
     const codexSupport = supports.find((support) => support.provider.key === "codex");
     const moonshotSupport = supports.find((support) => support.provider.key === "moonshot");
+    const openRouterSupport = supports.find((support) => support.provider.key === "openrouter");
     const sub2ApiEnabled = sub2ApiSupport?.enabled ?? isProviderEnabled(config, "sub2api");
     const sub2ApiProviders = await getSub2ApiProviderCandidates(ctx);
     const sub2ApiMenuOption = getProviderMenuOption(sub2ApiPrefix, "Sub2Api", sub2ApiSupport);
     const deepSeekMenuOption = getProviderMenuOption(deepSeekPrefix, "DeepSeek", deepSeekSupport);
     const codexMenuOption = getProviderMenuOption(codexPrefix, "OpenAI Codex", codexSupport);
     const moonshotMenuOption = getProviderMenuOption(moonshotPrefix, "Moonshot", moonshotSupport);
+    const openRouterMenuOption = getProviderMenuOption(openRouterPrefix, "OpenRouter", openRouterSupport);
+    const openRouterDisplayOption = getProviderActionOption(
+      "openrouter-display",
+      getProviderActionLabel(formatEnabled(openRouterSupport?.enabled ?? false), "Display", "OpenRouter"),
+      openRouterSupport,
+    );
     const sub2ApiDisplayOption = getProviderActionOption(
       "sub2api-display",
       getProviderActionLabel(formatEnabled(sub2ApiEnabled), "Display", "Sub2Api"),
@@ -529,6 +548,14 @@ async function openBalanceMenu(
             ]
           : []
       ),
+      ...(
+        openRouterSupport
+          ? [
+              openRouterMenuOption,
+              ...(openRouterExpanded ? [openRouterDisplayOption] : []),
+            ]
+          : []
+      ),
       { label: "Back", value: "Back", choice: "Back" },
     ];
     const optionChoices = new Map(options.map((option) => [option.value, option.choice]));
@@ -547,6 +574,7 @@ async function openBalanceMenu(
       deepSeekExpanded = false;
       codexExpanded = false;
       moonshotExpanded = false;
+      openRouterExpanded = false;
       continue;
     }
 
@@ -556,6 +584,7 @@ async function openBalanceMenu(
       deepSeekExpanded = nextExpanded;
       codexExpanded = false;
       moonshotExpanded = false;
+      openRouterExpanded = false;
       continue;
     }
 
@@ -565,6 +594,7 @@ async function openBalanceMenu(
       deepSeekExpanded = false;
       codexExpanded = nextExpanded;
       moonshotExpanded = false;
+      openRouterExpanded = false;
       continue;
     }
 
@@ -574,6 +604,17 @@ async function openBalanceMenu(
       deepSeekExpanded = false;
       codexExpanded = false;
       moonshotExpanded = nextExpanded;
+      openRouterExpanded = false;
+      continue;
+    }
+
+    if (choice === openRouterMenuOption.choice) {
+      const nextExpanded: boolean = !openRouterExpanded;
+      sub2ApiExpanded = false;
+      deepSeekExpanded = false;
+      codexExpanded = false;
+      moonshotExpanded = false;
+      openRouterExpanded = nextExpanded;
       continue;
     }
 
@@ -611,6 +652,13 @@ async function openBalanceMenu(
 
     if (choice === moonshotDisplayOption.choice && moonshotSupport?.configured) {
       const nextConfig = setProviderEnabled(config, "moonshot", !moonshotSupport.enabled);
+      await onConfigChange(nextConfig);
+      config = nextConfig;
+      continue;
+    }
+
+    if (choice === openRouterDisplayOption.choice && openRouterSupport?.configured) {
+      const nextConfig = setProviderEnabled(config, "openrouter", !(openRouterSupport?.enabled ?? false));
       await onConfigChange(nextConfig);
       config = nextConfig;
       continue;
@@ -892,6 +940,16 @@ async function getProviderSupports(
       details.push(hasMoonshotModel ? "已发现 Moonshot 模型" : "未发现 Moonshot 模型");
       details.push(configured ? "Moonshot 认证可用" : "Moonshot 认证不可用");
     }
+    if (provider.key === "openrouter") {
+      const hasOpenRouterModel = models.some((model) =>
+        model.provider === "openrouter" || normalizeBaseUrl(model.baseUrl)?.includes("openrouter.ai"),
+      );
+      configured = availableModels.some((model) =>
+        model.provider === "openrouter" || normalizeBaseUrl(model.baseUrl)?.includes("openrouter.ai"),
+      );
+      details.push(hasOpenRouterModel ? "已发现 OpenRouter 模型" : "未发现 OpenRouter 模型");
+      details.push(configured ? "OpenRouter 认证可用" : "OpenRouter 认证不可用");
+    }
 
 
     return {
@@ -996,6 +1054,22 @@ async function trySub2ApiBalance(
   }
 
   return undefined;
+}
+
+async function tryOpenRouterBalance(
+  context: FetchContext,
+  signal?: AbortSignal,
+): Promise<BalanceResult | undefined> {
+  const { baseUrl, headers } = context;
+  if (signal?.aborted) return undefined;
+
+  const url = `${getProviderRootUrl(baseUrl)}/v1/credits`;
+  const data = await getJson(url, headers, signal);
+
+  const remaining = extractOpenRouterRemaining(data);
+  if (remaining === undefined) return undefined;
+
+  return { amount: remaining, unit: "$" };
 }
 
 async function tryCodexUsage(
@@ -1582,6 +1656,17 @@ export function extractMoonshotAvailableBalance(value: unknown): number | undefi
   if (toNumber(payload.code) !== 0 || payload.status !== true) return undefined;
 
   return toNumber(getRecord(payload.data)?.available_balance);
+}
+
+export function extractOpenRouterRemaining(value: unknown): number | undefined {
+  const payload = getRecord(value);
+  if (!payload) return undefined;
+
+  const totalCredits = toNumber(getRecord(payload.data)?.total_credits);
+  const totalUsage = toNumber(getRecord(payload.data)?.total_usage);
+  if (totalCredits === undefined || totalUsage === undefined) return undefined;
+
+  return totalCredits - totalUsage;
 }
 
 function getRecord(value: unknown): Record<string, unknown> | undefined {
