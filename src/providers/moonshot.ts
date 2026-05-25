@@ -9,6 +9,7 @@ import type {
 import { getJson, getProviderRootUrl, getRecord, toNumber } from "../utils.js";
 import type { BalanceProvider } from "./types.js";
 import { registry } from "./registry.js";
+import { t } from "../i18n/index.js";
 
 /** Extract Moonshot available balance */
 export function extractMoonshotAvailableBalance(value: unknown): number | undefined {
@@ -27,7 +28,7 @@ export const moonshotProvider: BalanceProvider = {
   definition: {
     key: "moonshot",
     label: "Moonshot",
-    description: "Moonshot /v1/users/me/balance 余额",
+    description: t("desc_moonshot"),
     enabledByDefault: true,
   },
 
@@ -66,8 +67,8 @@ export const moonshotProvider: BalanceProvider = {
       configured,
       enabled: true,
       details: [
-        hasModel ? "已发现 Moonshot 模型" : "未发现 Moonshot 模型",
-        configured ? "Moonshot 认证可用" : "Moonshot 认证不可用",
+        hasModel ? t("support_model_found", { provider: "Moonshot" }) : t("support_model_not_found", { provider: "Moonshot" }),
+        configured ? t("support_auth_available", { provider: "Moonshot" }) : t("support_auth_unavailable", { provider: "Moonshot" }),
       ],
     };
   },

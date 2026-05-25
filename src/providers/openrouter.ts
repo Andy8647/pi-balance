@@ -9,6 +9,7 @@ import type {
 import { getJson, getProviderRootUrl, getRecord, toNumber } from "../utils.js";
 import type { BalanceProvider } from "./types.js";
 import { registry } from "./registry.js";
+import { t } from "../i18n/index.js";
 
 /** Compute OpenRouter remaining credits */
 export function extractOpenRouterRemaining(value: unknown): number | undefined {
@@ -29,7 +30,7 @@ export const openrouterProvider: BalanceProvider = {
   definition: {
     key: "openrouter",
     label: "OpenRouter",
-    description: "OpenRouter /credits 剩余额度",
+    description: t("desc_openrouter"),
     enabledByDefault: true,
   },
 
@@ -67,8 +68,8 @@ export const openrouterProvider: BalanceProvider = {
       configured,
       enabled: true,
       details: [
-        hasModel ? "已发现 OpenRouter 模型" : "未发现 OpenRouter 模型",
-        configured ? "OpenRouter 认证可用" : "OpenRouter 认证不可用",
+        hasModel ? t("support_model_found", { provider: "OpenRouter" }) : t("support_model_not_found", { provider: "OpenRouter" }),
+        configured ? t("support_auth_available", { provider: "OpenRouter" }) : t("support_auth_unavailable", { provider: "OpenRouter" }),
       ],
     };
   },

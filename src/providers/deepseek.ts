@@ -9,6 +9,7 @@ import type {
 import { getJson, getProviderRootUrl, getRecord, toNumber, currencyToUnit } from "../utils.js";
 import type { BalanceProvider } from "./types.js";
 import { registry } from "./registry.js";
+import { t } from "../i18n/index.js";
 
 // ══════════════════════════════════════════════════════════════
 // DeepSeek balance provider
@@ -19,7 +20,7 @@ export const deepseekProvider: BalanceProvider = {
   definition: {
     key: "deepseek",
     label: "DeepSeek",
-    description: "DeepSeek /user/balance 余额",
+    description: t("desc_deepseek"),
     enabledByDefault: true,
   },
 
@@ -75,8 +76,8 @@ export const deepseekProvider: BalanceProvider = {
       configured,
       enabled: true, // will be determined by config
       details: [
-        hasModel ? "已发现 DeepSeek 模型" : "未发现 DeepSeek 模型",
-        configured ? "DeepSeek 认证可用" : "DeepSeek 认证不可用",
+        hasModel ? t("support_model_found", { provider: "DeepSeek" }) : t("support_model_not_found", { provider: "DeepSeek" }),
+        configured ? t("support_auth_available", { provider: "DeepSeek" }) : t("support_auth_unavailable", { provider: "DeepSeek" }),
       ],
     };
   },

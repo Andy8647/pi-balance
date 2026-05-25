@@ -16,6 +16,7 @@ import { normalizeBaseUrl, hasHeader, formatBalance } from "./utils.js";
 import { registry } from "./providers/registry.js";
 import { openBalanceMenu, buildSupportReport } from "./menu.js";
 import { resetSub2ApiProbeCache } from "./providers/sub2api.js";
+import { t, setLanguage } from "./i18n/index.js";
 
 // ══════════════════════════════════════════════════════════════
 // Import provider modules to trigger auto-registration
@@ -116,7 +117,7 @@ export default function (pi: ExtensionAPI) {
   // ── Command registration ─────────────────────────────────
 
   pi.registerCommand("balance", {
-    description: "pi-balance: status / enable|disable|toggle <provider> / sub2api / refresh",
+    description: "pi-balance: status / enable|disable|toggle <provider> / sub2api / refresh / lang <zh-CN|en>",
     getArgumentCompletions: (prefix: string) => {
       const trimmed = prefix.trim();
       // Provider names for enable/disable/toggle
@@ -141,8 +142,15 @@ export default function (pi: ExtensionAPI) {
           .filter((n) => n.toLowerCase().startsWith(partial.toLowerCase()))
           .map((n) => ({ value: `toggle ${n}`, label: `toggle ${n}` }));
       }
+      if (trimmed.startsWith("lang ")) {
+        const partial = trimmed.slice("lang ".length);
+        const langs = ["zh-CN", "en"];
+        return langs
+          .filter((l) => l.toLowerCase().startsWith(partial.toLowerCase()))
+          .map((l) => ({ value: `lang ${l}`, label: `lang ${l}` }));
+      }
 
-      const commands = ["status", "refresh", "enable ", "disable ", "toggle ", "sub2api", "sub2api rescan"];
+      const commands = ["status", "refresh", "enable ", "disable ", "toggle ", "sub2api", "sub2api rescan", "lang "];
       return commands
         .filter((c) => c.startsWith(trimmed))
         .map((c) => ({ value: c, label: c }));
@@ -155,7 +163,7 @@ export default function (pi: ExtensionAPI) {
       // refresh
       if (action === "refresh") {
         await refreshBalance();
-        ctx.ui.notify("余额状态已刷新", "info");
+        ctx.ui.notify(t("balance_refreshed"), "info");
         return;
       }
 
@@ -192,7 +200,7 @@ export default function (pi: ExtensionAPI) {
       // sub2api rescan
       if (action === "sub2api rescan" || action === "rescan sub2api") {
         resetSub2ApiProbeCache();
-        ctx.ui.notify("Sub2Api provider 探测缓存已清空，将重新扫描", "info");
+        ctx.ui.notify(t("sub2api_cache_cleared"), "info");
         // Open Sub2Api sub-menu after rescan
         const sub2apiProvider = registry.get("sub2api");
         if (sub2apiProvider?.openCustomSubMenu) {
@@ -210,13 +218,13 @@ export default function (pi: ExtensionAPI) {
         const providerArg = action.slice("enable ".length);
         const provider = registry.findByFuzzyName(providerArg);
         if (!provider) {
-          ctx.ui.notify(`未知 provider：${providerArg}`, "error");
+          ctx.ui.notify(t("unknown_provider", { name: providerArg }), "error");
           return;
         }
         config = setProviderEnabled(config, provider.key, true);
         persistConfig(pi, config);
         await refreshBalance();
-        ctx.ui.notify(`${provider.definition.label} 显示已开启`, "info");
+        ctx.ui.notify(t("provider_enabled", { label: provider.definition.label }), "info");
         return;
       }
 
@@ -225,13 +233,13 @@ export default function (pi: ExtensionAPI) {
         const providerArg = action.slice("disable ".length);
         const provider = registry.findByFuzzyName(providerArg);
         if (!provider) {
-          ctx.ui.notify(`未知 provider：${providerArg}`, "error");
+          ctx.ui.notify(t("unknown_provider", { name: providerArg }), "error");
           return;
         }
         config = setProviderEnabled(config, provider.key, false);
         persistConfig(pi, config);
         await refreshBalance();
-        ctx.ui.notify(`${provider.definition.label} 显示已关闭`, "info");
+        ctx.ui.notify(t("provider_disabled", { label: provider.definition.label }), "info");
         return;
       }
 
@@ -240,7 +248,7 @@ export default function (pi: ExtensionAPI) {
         const providerArg = action.slice("toggle ".length);
         const provider = registry.findByFuzzyName(providerArg);
         if (!provider) {
-          ctx.ui.notify(`未知 provider：${providerArg}`, "error");
+          ctx.ui.notify(t("unknown_provider", { name: providerArg }), "error");
           return;
         }
         config = setProviderEnabled(
@@ -249,13 +257,30 @@ export default function (pi: ExtensionAPI) {
           !isProviderEnabled(config, provider.key),
         );
         persistConfig(pi, config);
-        await refreshBalance();
         ctx.ui.notify(
-          `${provider.definition.label} 显示已${
-            isProviderEnabled(config, provider.key) ? "开启" : "关闭"
-          }`,
+          t("provider_toggled", {
+            label: provider.definition.label,
+            status: isProviderEnabled(config, provider.key)
+              ? t("status_enabled")
+              : t("status_disabled"),
+          }),
           "info",
         );
+        return;
+      }
+
+      // lang <zh-CN|en> — switch language
+      if (action.startsWith("lang ")) {
+        const langArg = action.slice("lang ".length).trim();
+        if (langArg === "zh-cn" || langArg === "zh" || langArg === "cn") {
+          setLanguage("zh-CN");
+          ctx.ui.notify(t("lang_switched_zh"), "info");
+        } else if (langArg === "en" || langArg === "english") {
+          setLanguage("en");
+          ctx.ui.notify(t("lang_switched_en"), "info");
+        } else {
+          ctx.ui.notify(t("lang_unsupported", { name: langArg }), "error");
+        }
         return;
       }
 

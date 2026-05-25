@@ -37,6 +37,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { BalanceProvider, ExtraMenuAction } from "./types.js";
 import { registry } from "./registry.js";
+import { t } from "../i18n/index.js";
 
 // ══════════════════════════════════════════════════════════════
 // Codex: balance fetching
@@ -374,10 +375,10 @@ function formatRemainingPercent(window: NormalizedRateLimitWindow): string {
 }
 
 function formatCredits(credits: NormalizedCredits): string {
-  if (!credits.hasCredits) return "no credits";
-  if (credits.unlimited) return "unlimited";
+  if (!credits.hasCredits) return t("codex_no_credits");
+  if (credits.unlimited) return t("codex_unlimited");
   const balance = credits.balance?.trim();
-  return balance ? `${formatNumber(Number(balance), balance)} credits` : "credits";
+  return balance ? `${formatNumber(Number(balance), balance)} ${t("codex_credits")}` : t("codex_credits");
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -542,7 +543,7 @@ export const codexProvider: BalanceProvider = {
   definition: {
     key: "codex",
     label: "OpenAI Codex",
-    description: "OpenAI Codex ChatGPT 订阅用量",
+    description: t("desc_codex"),
     enabledByDefault: true,
   },
 
@@ -579,11 +580,11 @@ export const codexProvider: BalanceProvider = {
       configured,
       enabled: true,
       details: [
-        hasCodexModel ? "已发现 OpenAI Codex 模型" : "未发现 OpenAI Codex 模型",
-        configured ? "OpenAI Codex 认证可用" : "OpenAI Codex 认证不可用",
+        hasCodexModel ? t("support_model_found", { provider: "OpenAI Codex" }) : t("support_model_not_found", { provider: "OpenAI Codex" }),
+        configured ? t("support_auth_available", { provider: "OpenAI Codex" }) : t("support_auth_unavailable", { provider: "OpenAI Codex" }),
         config.codexAppServerFallback
-          ? "会优先复用 Pi 的 Codex 订阅认证，必要时回退到 codex app-server"
-          : "会仅复用 Pi 的 Codex 订阅认证；codex app-server 回退已关闭",
+          ? t("support_codex_fallback_on")
+          : t("support_codex_fallback_off"),
       ],
     };
   },
@@ -594,7 +595,7 @@ export const codexProvider: BalanceProvider = {
         id: "codex-cli-fallback",
         getLabel(cfg: BalanceConfig): string {
           const icon = cfg.codexAppServerFallback ? "◉" : "○";
-          return `  ${icon} CLI fallback - OpenAI Codex`;
+          return `  ${icon} ${t("codex_cli_fallback")} - OpenAI Codex`;
         },
         onToggle(cfg: BalanceConfig): BalanceConfig {
           return { ...cfg, codexAppServerFallback: !cfg.codexAppServerFallback };

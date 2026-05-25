@@ -16,6 +16,7 @@ import {
 import type { BalanceProvider, ExtraMenuAction } from "./providers/types.js";
 import { registry } from "./providers/registry.js";
 import { getSub2ApiProviderCandidates } from "./providers/sub2api.js";
+import { t } from "./i18n/index.js";
 
 // ══════════════════════════════════════════════════════════════
 // Helpers
@@ -42,11 +43,8 @@ function formatUnavailableMenuText(text: string): string {
 }
 
 function getProviderUnavailableReason(support: ProviderSupport | undefined): string {
-  if (!support) return "未就绪";
-  const unavailableDetail = support.details.find(
-    (detail) => detail.includes("不可用") || detail.includes("未发现"),
-  );
-  return unavailableDetail ?? "未就绪";
+  if (!support?.configured) return t("status_not_ready");
+  return t("status_available");
 }
 
 function providerMatchesModel(
@@ -180,7 +178,7 @@ export async function openBalanceMenu(
 
     // Refresh
     choices.set("Refresh", { kind: "refresh" });
-    options.push({ label: "Refresh", value: "Refresh", choice: "Refresh" });
+    options.push({ label: t("menu_refresh"), value: t("menu_refresh"), choice: t("menu_refresh") });
 
     for (const provider of providers) {
       const support = allSupports.find((s) => s.provider.key === provider.key);
@@ -198,7 +196,7 @@ export async function openBalanceMenu(
       // Display toggle
       const displayLabel = displayActionLabel(
         formatEnabled(enabled),
-        "Display",
+        t("menu_display"),
         provider.definition.label,
       );
       const displayOpt = secondaryOption(`display-${provider.key}`, displayLabel, !support?.configured);
@@ -236,7 +234,7 @@ export async function openBalanceMenu(
 
     // Back
     choices.set("Back", { kind: "back" });
-    options.push({ label: "Back", value: "Back", choice: "Back" });
+    options.push({ label: t("menu_back"), value: t("menu_back"), choice: t("menu_back") });
 
     const choiceValue = await ctx.ui.select("pi-balance", options.map((o) => o.value));
     if (!choiceValue || choiceValue === "Back") return;
@@ -322,8 +320,8 @@ export async function buildSupportReport(
 function formatSupportReport(supports: ProviderSupport[]): string {
   return supports
     .map((support) => {
-      const enabled = support.enabled ? "开启" : "关闭";
-      const configured = support.configured ? "可用" : "未就绪";
+      const enabled = support.enabled ? t("status_enabled") : t("status_disabled");
+      const configured = support.configured ? t("status_available") : t("status_not_ready");
       return `${support.provider.label}: ${enabled} / ${configured}\n  ${support.details.join("；")}`;
     })
     .join("\n\n");

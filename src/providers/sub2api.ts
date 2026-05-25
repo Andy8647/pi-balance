@@ -31,6 +31,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { BalanceProvider } from "./types.js";
 import { registry } from "./registry.js";
+import { t } from "../i18n/index.js";
 
 // ══════════════════════════════════════════════════════════════
 
@@ -181,7 +182,7 @@ export const sub2apiProvider: BalanceProvider = {
   definition: {
     key: "sub2api",
     label: "Sub2Api",
-    description: "Sub2Api /usage 剩余额度",
+    description: t("desc_sub2api"),
     enabledByDefault: true,
   },
 
@@ -227,8 +228,8 @@ export const sub2apiProvider: BalanceProvider = {
       configured,
       enabled: true,
       details: [
-        "兼容 API 会在当前模型 baseUrl 上尝试 /usage 与 /v1/usage",
-        configured ? "至少一个模型认证可用" : "未发现可用模型认证",
+        t("support_sub2api_compat"),
+        configured ? t("support_sub2api_auth_available") : t("support_sub2api_no_auth"),
       ],
     };
   },
