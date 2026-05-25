@@ -36,6 +36,7 @@ pi-balance is an **extension** for the [pi coding agent](https://github.com/eare
 - ✅ **Multi-provider support** — DeepSeek, Moonshot/Kimi, OpenRouter, Sub2Api, OpenAI Codex (and compatible APIs)
 - ✅ **Zero configuration for balance APIs** — supported balance APIs work from existing model headers
 - ✅ **Graceful fallback** — quietly hides when balance info is unavailable
+- ✅ **i18n support** — English and Simplified Chinese, with `/balance lang <zh-CN|en>` command
 
 ## 📦 Installation
 
@@ -117,6 +118,8 @@ You can also use command arguments directly:
 /balance toggle sub2api
 /balance sub2api               # Open Sub2Api sub-provider menu
 /balance sub2api rescan         # Re-scan for new Sub2Api providers
+/balance lang zh-CN             # Switch to Simplified Chinese
+/balance lang en                # Switch to English
 ```
 
 ### Configuration Notes
@@ -172,6 +175,10 @@ pi-balance/
 │       ├── openrouter.ts          # OpenRouter provider
 │       ├── sub2api.ts             # Sub2Api + auto-discovery
 │       └── codex.ts               # OpenAI Codex + CLI fallback
+│   └── i18n/
+│       ├── index.ts              # t() function + language detection
+│       ├── zh-CN.ts              # Chinese translations
+│       └── en.ts                 # English translations
 ├── tests/
 │   └── index.test.ts
 ├── LICENSE                       # MIT license

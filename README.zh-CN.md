@@ -36,6 +36,7 @@ pi-balance 是 [pi 编码代理](https://github.com/earendil-works/pi-coding-age
 - ✅ **多提供商支持** —— DeepSeek、Moonshot/Kimi、OpenRouter、Sub2Api、OpenAI Codex 及兼容 API
 - ✅ **余额接口零配置** —— 支持的余额接口可复用模型 headers
 - ✅ **优雅降级** —— 无法获取余额时自动隐藏，不干扰使用
+- ✅ **国际化支持** —— 简体中文与英文，支持 `/balance lang <zh-CN|en>` 切换
 
 ## 📦 安装
 
@@ -117,6 +118,8 @@ DeepSeek: ¥49.87
 /balance toggle sub2api
 /balance sub2api               # 打开 Sub2Api 子 provider 菜单
 /balance sub2api rescan         # 重新扫描 Sub2Api provider
+/balance lang zh-CN             # 切换至简体中文
+/balance lang en                # 切换至英文
 ```
 
 ### 配置说明
@@ -172,6 +175,10 @@ pi-balance/
 │       ├── openrouter.ts          # OpenRouter provider
 │       ├── sub2api.ts             # Sub2Api + 自动探测
 │       └── codex.ts               # OpenAI Codex + CLI 回退
+│   └── i18n/
+│       ├── index.ts              # t() 翻译函数与语言检测
+│       ├── zh-CN.ts              # 中文翻译
+│       └── en.ts                 # 英文翻译
 ├── tests/
 │   └── index.test.ts
 ├── LICENSE                       # MIT 许可证
