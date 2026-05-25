@@ -82,7 +82,7 @@ export function formatBalance(result: BalanceResult): string {
     maximumFractionDigits: 2,
   });
 
-  return result.unit === "$" ? `${result.unit}${amount}` : `${amount}${result.unit}`;
+  return `${result.unit}${amount}`;
 }
 
 // ══════════════════════════════════════════════════════════════

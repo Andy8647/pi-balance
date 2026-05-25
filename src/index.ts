@@ -3,7 +3,6 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { BalanceResult, BalanceConfig, FetchContext } from "./types.js";
 import {
   STATUS_KEY,
-  REFRESH_INTERVAL_MS,
   DEFAULT_CONFIG,
 } from "./types.js";
 import {
@@ -12,7 +11,7 @@ import {
   isProviderEnabled,
   setProviderEnabled,
 } from "./config.js";
-import { normalizeBaseUrl, hasHeader, formatBalance } from "./utils.js";
+import { normalizeBaseUrl, hasHeader, formatBalance, formatNumber } from "./utils.js";
 import { registry } from "./providers/registry.js";
 import { openBalanceMenu, buildSupportReport } from "./menu.js";
 import { resetSub2ApiProbeCache } from "./providers/sub2api.js";
@@ -45,72 +44,86 @@ export {
 // ══════════════════════════════════════════════════════════════
 
 export default function (pi: ExtensionAPI) {
-  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let activeRequest: AbortController | undefined;
   let requestVersion = 0;
   let config: BalanceConfig = { ...DEFAULT_CONFIG };
   let currentCtx: ExtensionContext | undefined;
+  let previousBalance: { amount: number; unit: string } | undefined;
 
-  const clearTimer = () => {
-    if (!refreshTimer) return;
-    clearTimeout(refreshTimer);
-    refreshTimer = undefined;
-  };
-
-  const abortActiveRequest = () => {
+  const abortAndClear = () => {
     activeRequest?.abort();
     activeRequest = undefined;
   };
 
-  const stopRefresh = () => {
-    requestVersion++;
-    clearTimer();
-    abortActiveRequest();
-  };
-
-  const scheduleRefresh = () => {
-    clearTimer();
-    refreshTimer = setTimeout(() => void refreshBalance(), REFRESH_INTERVAL_MS);
-  };
-
-  const refreshBalance = async () => {
-    const ctx = currentCtx;
-    if (!ctx) return;
-
-    const version = ++requestVersion;
-    const model = ctx.model;
-
-    clearTimer();
-    abortActiveRequest();
-    ctx.ui.setStatus(STATUS_KEY, undefined);
-
-    if (!model) return;
-
-    const controller = new AbortController();
-    activeRequest = controller;
-
+  const refreshBalance = async (showDelta = false) => {
     try {
-      const result = await fetchProviderBalance(ctx, model, config, controller.signal);
-      if (version !== requestVersion || controller.signal.aborted) return;
+      const ctx = currentCtx;
+      if (!ctx) return;
 
-      if (result) {
-        if ("text" in result) {
-          ctx.ui.setStatus(STATUS_KEY, result.text);
+      const version = ++requestVersion;
+      const model = ctx.model;
+
+      abortAndClear();
+      ctx.ui.setStatus(STATUS_KEY, undefined);
+
+      if (!model) return;
+
+      const controller = new AbortController();
+      activeRequest = controller;
+
+      try {
+        const result = await fetchProviderBalance(ctx, model, config, controller.signal);
+        if (version !== requestVersion || controller.signal.aborted) return;
+
+        if (result) {
+          let statusText: string;
+          if ("text" in result) {
+            statusText = result.text;
+          } else {
+            const providerName =
+              ctx.modelRegistry.getProviderDisplayName(model.provider) || model.provider;
+            const balanceStr = formatBalance(result);
+
+            // Compute delta vs previous balance
+            let deltaPart = "";
+            if (showDelta && previousBalance && !("text" in previousBalance)) {
+              const delta = result.amount - previousBalance.amount;
+              if (Math.abs(delta) >= 0.001) {
+                const sign = delta > 0 ? "▲" : "▼";
+                const color = delta > 0 ? "\u001b[34m" : "\u001b[31m";
+                const reset = "\u001b[39m";
+                const absDelta = formatNumber(Math.abs(delta), "0");
+                const unit = result.unit || "$";
+                deltaPart = ` ${color}${sign}${reset}${unit}${color}${absDelta}${reset}`;
+              }
+            }
+
+            statusText = `${providerName}: ${balanceStr}${deltaPart}`;
+          }
+          ctx.ui.setStatus(STATUS_KEY, statusText);
         } else {
-          const providerName =
-            ctx.modelRegistry.getProviderDisplayName(model.provider) || model.provider;
-          ctx.ui.setStatus(STATUS_KEY, `${providerName}: ${formatBalance(result)}`);
+          ctx.ui.setStatus(STATUS_KEY, undefined);
         }
-      } else {
-        ctx.ui.setStatus(STATUS_KEY, undefined);
+
+        // Update previous balance for next comparison
+        if (result && !("text" in result)) {
+          previousBalance = { amount: result.amount, unit: result.unit };
+        }
+      } catch {
+        if (version === requestVersion) ctx.ui.setStatus(STATUS_KEY, undefined);
+      } finally {
+        if (version === requestVersion) {
+          activeRequest = undefined;
+        }
       }
-    } catch {
-      if (version === requestVersion) ctx.ui.setStatus(STATUS_KEY, undefined);
-    } finally {
-      if (version === requestVersion) {
-        activeRequest = undefined;
-        scheduleRefresh();
+    } catch (err) {
+      // ctx is stale after session replacement/reload — stop
+      if (err instanceof Error && err.message.includes("stale after session")) {
+        requestVersion++;
+        abortAndClear();
+        return;
       }
+      throw err;
     }
   };
 
@@ -162,6 +175,7 @@ export default function (pi: ExtensionAPI) {
 
       // refresh
       if (action === "refresh") {
+        previousBalance = undefined;
         await refreshBalance();
         ctx.ui.notify(t("balance_refreshed"), "info");
         return;
@@ -294,18 +308,30 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
     config = loadConfig(ctx);
+    previousBalance = undefined;
     void refreshBalance();
   });
 
   pi.on("model_select", async (_event, ctx) => {
     currentCtx = ctx;
     config = loadConfig(ctx);
+    previousBalance = undefined;
     void refreshBalance();
   });
 
+  pi.on("agent_end", async (_event, ctx) => {
+    currentCtx = ctx;
+    void refreshBalance(true);
+  });
+
   pi.on("session_shutdown", async (_event, ctx) => {
-    stopRefresh();
-    ctx.ui.setStatus(STATUS_KEY, undefined);
+    requestVersion++;
+    abortAndClear();
+    try {
+      ctx.ui.setStatus(STATUS_KEY, undefined);
+    } catch {
+      // ctx may be stale after session replacement — ignore
+    }
   });
 }
 
