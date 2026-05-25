@@ -20,7 +20,12 @@ import {
   toNumber,
   hasHeader,
 } from "../utils.js";
-import { REQUEST_TIMEOUT_MS, SUB2API_PROBE_CACHE_TTL_MS } from "../types.js";
+import {
+  MENU_COLOR_RESET,
+  MENU_CURRENT_PROVIDER_COLOR,
+  REQUEST_TIMEOUT_MS,
+  SUB2API_PROBE_CACHE_TTL_MS,
+} from "../types.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -28,6 +33,10 @@ import type { BalanceProvider } from "./types.js";
 import { registry } from "./registry.js";
 
 // ══════════════════════════════════════════════════════════════
+
+function formatCurrentProviderMenuText(text: string): string {
+  return `${MENU_CURRENT_PROVIDER_COLOR}${text}${MENU_COLOR_RESET}`;
+}
 // Sub2Api: extract remaining from usage response
 // ══════════════════════════════════════════════════════════════
 
@@ -234,12 +243,17 @@ export const sub2apiProvider: BalanceProvider = {
 
     while (true) {
       const providers = await getSub2ApiProviderCandidates(ctx);
-      const displayOption = `${formatEnabled(isProviderEnabled(currentConfig, "sub2api"))} Display`;
+      const sub2apiEnabled = isProviderEnabled(currentConfig, "sub2api");
+      const displayOption = `${formatEnabled(sub2apiEnabled)} Display`;
       const providerOptions = new Map(
-        providers.map((provider) => [
-          `${formatEnabled(isSub2ApiProviderEnabled(currentConfig, provider))} ${provider}`,
-          provider,
-        ]),
+        providers.map((provider) => {
+          const enabled = isSub2ApiProviderEnabled(currentConfig, provider);
+          const rawLabel = `${formatEnabled(enabled)} ${provider}`;
+          const label = ctx.model?.provider === provider
+            ? formatCurrentProviderMenuText(rawLabel)
+            : rawLabel;
+          return [label, provider];
+        }),
       );
       const options = [
         "Rescan providers",
@@ -256,7 +270,11 @@ export const sub2apiProvider: BalanceProvider = {
       }
 
       if (choice === displayOption) {
-        const nextConfig = setProviderEnabled(currentConfig, "sub2api", !isProviderEnabled(currentConfig, "sub2api"));
+        const nextConfig = setProviderEnabled(
+          currentConfig,
+          "sub2api",
+          !isProviderEnabled(currentConfig, "sub2api"),
+        );
         await onConfigChange(nextConfig);
         currentConfig = nextConfig;
         continue;

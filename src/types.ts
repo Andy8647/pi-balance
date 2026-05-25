@@ -62,6 +62,7 @@ export const SUB2API_PROBE_CACHE_TTL_MS = 60 * 1000;
 export const MENU_UNAVAILABLE_COLOR = "\u001b[90m";
 export const MENU_MUTED_COLOR = "\u001b[90m";
 export const MENU_COLOR_RESET = "\u001b[39m";
+export const MENU_CURRENT_PROVIDER_COLOR = "\u001b[33m";
 
 // ── Codex-specific types ────────────────────────────────────
 export type CodexUsageReport = {

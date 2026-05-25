@@ -1,9 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BalanceConfig, ProviderSupport, MenuOption } from "./types.js";
 import {
+  CODEX_PROVIDER_ID,
   MENU_UNAVAILABLE_COLOR,
   MENU_MUTED_COLOR,
   MENU_COLOR_RESET,
+  MENU_CURRENT_PROVIDER_COLOR,
 } from "./types.js";
 import {
   isProviderEnabled,
@@ -31,12 +33,38 @@ function formatMutedMenuText(text: string): string {
   return `${MENU_MUTED_COLOR}${text}${MENU_COLOR_RESET}`;
 }
 
+function formatCurrentProviderMenuText(text: string): string {
+  return `${MENU_CURRENT_PROVIDER_COLOR}${text}${MENU_COLOR_RESET}`;
+}
+
+function formatUnavailableMenuText(text: string): string {
+  return `${MENU_UNAVAILABLE_COLOR}${text}${MENU_COLOR_RESET}`;
+}
+
 function getProviderUnavailableReason(support: ProviderSupport | undefined): string {
   if (!support) return "未就绪";
   const unavailableDetail = support.details.find(
     (detail) => detail.includes("不可用") || detail.includes("未发现"),
   );
   return unavailableDetail ?? "未就绪";
+}
+
+function providerMatchesModel(
+  provider: BalanceProvider,
+  ctx: ExtensionContext,
+): boolean {
+  const model = ctx.model;
+  if (!model) return false;
+
+  if (provider.key === "codex") return model.provider === CODEX_PROVIDER_ID;
+  if (model.provider === provider.key) return true;
+  if (provider.key === "sub2api") return false;
+
+  return provider.shouldTry(model, model.baseUrl ?? "");
+}
+
+function isCurrentProvider(provider: BalanceProvider, ctx: ExtensionContext): boolean {
+  return providerMatchesModel(provider, ctx);
 }
 
 function providerMenuText(
@@ -53,9 +81,14 @@ function providerMenuOption(
   prefix: string,
   provider: BalanceProvider,
   support: ProviderSupport | undefined,
+  ctx: ExtensionContext,
 ): MenuOption {
   const text = providerMenuText(prefix, provider, support);
-  const labelText = support?.configured ?? false ? text : formatUnavailableMenuLabel(text);
+  const labelText = support?.configured ?? false
+    ? isCurrentProvider(provider, ctx)
+      ? formatCurrentProviderMenuText(text)
+      : text
+    : formatUnavailableMenuLabel(text);
   return { choice: text, label: labelText, value: labelText };
 }
 
@@ -65,6 +98,25 @@ function simpleOption(choice: string, label: string): MenuOption {
 
 function displayActionLabel(icon: string, action: string, providerLabel: string): string {
   return `  ${icon} ${action}${formatMutedMenuText(` - ${providerLabel}`)}`;
+}
+
+function secondaryOption(choice: string, label: string, unavailable: boolean): MenuOption {
+  if (!unavailable) return simpleOption(choice, label);
+  const unavailableLabel = formatUnavailableMenuText(label);
+  return { choice, label: unavailableLabel, value: unavailableLabel };
+}
+
+function sub2ApiProviderOption(
+  subProvider: string,
+  enabled: boolean,
+  currentProvider: string | undefined,
+): MenuOption {
+  const label = `  ${formatEnabled(enabled)} ${subProvider}`;
+  if (currentProvider === subProvider) {
+    const currentLabel = formatCurrentProviderMenuText(label);
+    return { choice: `s2a-${subProvider}`, label: currentLabel, value: currentLabel };
+  }
+  return simpleOption(`s2a-${subProvider}`, label);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -137,7 +189,7 @@ export async function openBalanceMenu(
       const prefix = isExpanded ? "▼" : "▶";
 
       // Main provider entry
-      const mainOption = providerMenuOption(prefix, provider, support);
+      const mainOption = providerMenuOption(prefix, provider, support, ctx);
       choices.set(mainOption.value, { kind: "expand", provider });
       options.push(mainOption);
 
@@ -149,7 +201,7 @@ export async function openBalanceMenu(
         "Display",
         provider.definition.label,
       );
-      const displayOpt = simpleOption(`display-${provider.key}`, displayLabel);
+      const displayOpt = secondaryOption(`display-${provider.key}`, displayLabel, !support?.configured);
       choices.set(displayOpt.value, { kind: "display-toggle", provider });
       options.push(displayOpt);
 
@@ -163,7 +215,7 @@ export async function openBalanceMenu(
         }) ?? [];
       for (const action of extraActions) {
         const label = action.getLabel(config);
-        const opt = simpleOption(action.id, label);
+        const opt = secondaryOption(action.id, label, !support?.configured);
         choices.set(opt.value, { kind: "extra-action", provider, action });
         options.push(opt);
       }
@@ -174,9 +226,8 @@ export async function openBalanceMenu(
           cachedSub2ApiProviders = await getSub2ApiProviderCandidates(ctx);
         }
         for (const subProvider of cachedSub2ApiProviders) {
-          const icon = formatEnabled(isSub2ApiProviderEnabled(config, subProvider));
-          const label = `  ${icon} ${subProvider}`;
-          const opt = simpleOption(`s2a-${subProvider}`, label);
+          const enabled = isSub2ApiProviderEnabled(config, subProvider);
+          const opt = sub2ApiProviderOption(subProvider, enabled, ctx.model?.provider);
           choices.set(opt.value, { kind: "sub2api-toggle", provider, subProvider });
           options.push(opt);
         }
