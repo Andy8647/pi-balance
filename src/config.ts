@@ -7,8 +7,11 @@ import type {
 import {
   CONFIG_ENTRY_TYPE,
   DEFAULT_CONFIG,
+  PROVIDER_KEYS,
 } from "./types.js";
 import { getRecord } from "./utils.js";
+
+const PROVIDER_KEY_SET = new Set<string>(PROVIDER_KEYS);
 
 // ══════════════════════════════════════════════════════════════
 // Config load / persist
@@ -102,7 +105,5 @@ export function setSub2ApiProviderEnabled(
 }
 
 function isProviderKey(value: unknown): value is ProviderKey {
-  return typeof value === "string" &&
-    (value === "deepseek" || value === "sub2api" || value === "codex" ||
-     value === "moonshot" || value === "openrouter");
+  return typeof value === "string" && PROVIDER_KEY_SET.has(value);
 }

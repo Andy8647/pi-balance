@@ -14,7 +14,15 @@ export type FetchContext = {
 };
 
 // ── Provider keys ───────────────────────────────────────────
-export type ProviderKey = "deepseek" | "sub2api" | "codex" | "moonshot" | "openrouter";
+export const PROVIDER_KEYS = [
+  "deepseek",
+  "sub2api",
+  "codex",
+  "moonshot",
+  "openrouter",
+] as const;
+
+export type ProviderKey = (typeof PROVIDER_KEYS)[number];
 
 // ── Provider metadata ───────────────────────────────────────
 export type ProviderDefinition = {
