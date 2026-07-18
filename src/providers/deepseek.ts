@@ -38,23 +38,43 @@ export const deepseekProvider: BalanceProvider = {
 
     if (!Array.isArray(infos)) return undefined;
 
-    let total = 0;
-    let unit = "¥";
-    let matched = false;
+    // DeepSeek returns one entry per currency (e.g. USD + CNY) with
+    // unstable array order. Pick the currency that has the largest
+    // total_balance, ignoring zero-balance entries.
+    let bestCurrency: string | undefined;
+    let bestAmount = -1;
+    const amounts = new Map<string, number>();
 
     for (const item of infos) {
       const record = getRecord(item);
       const amount = toNumber(record?.total_balance);
       if (amount === undefined) continue;
 
-      matched = true;
-      total += amount;
-
       const currency = typeof record?.currency === "string" ? record.currency : undefined;
-      unit = currencyToUnit(currency) ?? currency ?? unit;
+      const unit = currencyToUnit(currency) ?? currency;
+      if (unit === undefined) continue;
+
+      const prev = amounts.get(unit) ?? 0;
+      const sum = prev + amount;
+      amounts.set(unit, sum);
+
+      if (sum > bestAmount) {
+        bestAmount = sum;
+        bestCurrency = unit;
+      }
     }
 
-    return matched ? { amount: total, unit } : undefined;
+    if (bestCurrency === undefined || bestAmount <= 0) return undefined;
+
+    // Convert USD balances to CNY when PI_BALANCE_CNY_RATE is set.
+    if (bestCurrency === "$") {
+      const rate = Number(process.env.PI_BALANCE_CNY_RATE);
+      if (rate > 0) {
+        return { amount: bestAmount * rate, unit: "¥" };
+      }
+    }
+
+    return { amount: bestAmount, unit: bestCurrency };
   },
 
   getSupport(
@@ -74,7 +94,7 @@ export const deepseekProvider: BalanceProvider = {
     return {
       provider: this.definition,
       configured,
-      enabled: true, // will be determined by config
+      enabled: true,
       details: [
         hasModel ? t("support_model_found", { provider: "DeepSeek" }) : t("support_model_not_found", { provider: "DeepSeek" }),
         configured ? t("support_auth_available", { provider: "DeepSeek" }) : t("support_auth_unavailable", { provider: "DeepSeek" }),
