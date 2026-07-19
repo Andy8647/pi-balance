@@ -114,6 +114,8 @@ interface KimiRatios {
   reset5?: number;
   ratio7?: number;
   reset7?: number;
+  boosterLeft?: number;   // CNY remaining in booster wallet
+  boosterMonthly?: number; // CNY used this month
 }
 
 function readKimiUsageDetail(d: unknown): KimiUsageDetail | undefined {
@@ -177,14 +179,33 @@ function extractKimiUsagesRatio(payload: unknown): KimiRatios | undefined {
     }
   }
 
+  // Booster wallet
+  const bw = p.boosterWallet;
+  if (bw && typeof bw === "object") {
+    const b = bw as Record<string, unknown>;
+    const bal = b.balance;
+    if (bal && typeof bal === "object") {
+      const bl = bal as Record<string, unknown>;
+      const left = Number(bl.amountLeft ?? 0);
+      result.boosterLeft = left / 1e8; // nano-CNY → CNY
+    }
+    const mu = b.monthlyUsed;
+    if (mu && typeof mu === "object") {
+      const m = mu as Record<string, unknown>;
+      result.boosterMonthly = Number(m.priceInCents ?? 0) / 100;
+    }
+  }
+
   return (result.ratio5 !== undefined || result.ratio7 !== undefined) ? result : undefined;
 }
 
 function formatKimiCodingStatus(
-  stats: { ratio5?: number; reset5?: number },
+  stats: { ratio5?: number; reset5?: number; ratio7?: number; reset7?: number; boosterLeft?: number; boosterMonthly?: number },
   now = Date.now(),
 ): string {
   const parts: string[] = [];
+
+  // 5h rolling quota
   if (stats.ratio5 !== undefined) {
     const pct = Math.round(stats.ratio5 * 100);
     let s = `5h·${pct}%`;
@@ -192,11 +213,33 @@ function formatKimiCodingStatus(
       const ms = stats.reset5 - now;
       const h = Math.floor(ms / 3600000);
       const m = Math.ceil((ms % 3600000) / 60000);
-      s += ` ↺${h > 0 ? `${h}h` : ""}${m}m`;
+      s += `↺${h > 0 ? `${h}h` : ""}${m}m`;
     }
-    if (stats.ratio5 >= 1) s = ` ${s}`;
     parts.push(s);
   }
+
+  // 7d weekly quota
+  if (stats.ratio7 !== undefined) {
+    const pct = Math.round(stats.ratio7 * 100);
+    let s = `7d·${pct}%`;
+    if (stats.reset7 && stats.reset7 > now) {
+      const ms = stats.reset7 - now;
+      const d = Math.floor(ms / 86400000);
+      const h = Math.ceil((ms % 86400000) / 3600000);
+      s += `↺${d > 0 ? `${d}d` : ""}${h}h`;
+    }
+    parts.push(s);
+  }
+
+  // Booster wallet
+  if (stats.boosterLeft !== undefined) {
+    let s = `💰¥${stats.boosterLeft.toFixed(0)}`;
+    if (stats.boosterMonthly !== undefined && stats.boosterMonthly > 0) {
+      s += `(月¥${stats.boosterMonthly.toFixed(0)})`;
+    }
+    parts.push(s);
+  }
+
   return parts.length ? `Kimi: ${parts.join(" ")}` : "";
 }
 
