@@ -116,6 +116,7 @@ interface KimiRatios {
   reset7?: number;
   boosterLeft?: number;   // CNY remaining in booster wallet
   boosterMonthly?: number; // CNY used this month
+  boosterActive?: boolean; // booster wallet is enabled
 }
 
 function readKimiUsageDetail(d: unknown): KimiUsageDetail | undefined {
@@ -179,20 +180,25 @@ function extractKimiUsagesRatio(payload: unknown): KimiRatios | undefined {
     }
   }
 
-  // Booster wallet
+  // Booster wallet (only if enabled)
   const bw = p.boosterWallet;
   if (bw && typeof bw === "object") {
     const b = bw as Record<string, unknown>;
-    const bal = b.balance;
-    if (bal && typeof bal === "object") {
-      const bl = bal as Record<string, unknown>;
-      const left = Number(bl.amountLeft ?? 0);
-      result.boosterLeft = left / 1e8; // nano-CNY → CNY
-    }
-    const mu = b.monthlyUsed;
-    if (mu && typeof mu === "object") {
-      const m = mu as Record<string, unknown>;
-      result.boosterMonthly = Number(m.priceInCents ?? 0) / 100;
+    const status = String(b.status ?? "");
+    const active = status === "STATUS_ENABLED";
+    result.boosterActive = active;
+    if (active) {
+      const bal = b.balance;
+      if (bal && typeof bal === "object") {
+        const bl = bal as Record<string, unknown>;
+        const left = Number(bl.amountLeft ?? 0);
+        result.boosterLeft = left / 1e8; // nano-CNY → CNY
+      }
+      const mu = b.monthlyUsed;
+      if (mu && typeof mu === "object") {
+        const m = mu as Record<string, unknown>;
+        result.boosterMonthly = Number(m.priceInCents ?? 0) / 100;
+      }
     }
   }
 
@@ -200,7 +206,7 @@ function extractKimiUsagesRatio(payload: unknown): KimiRatios | undefined {
 }
 
 function formatKimiCodingStatus(
-  stats: { ratio5?: number; reset5?: number; ratio7?: number; reset7?: number; boosterLeft?: number; boosterMonthly?: number },
+  stats: { ratio5?: number; reset5?: number; ratio7?: number; reset7?: number; boosterLeft?: number; boosterMonthly?: number; boosterActive?: boolean },
   now = Date.now(),
 ): string {
   const parts: string[] = [];
@@ -231,16 +237,12 @@ function formatKimiCodingStatus(
     parts.push(s);
   }
 
-  // Booster wallet
-  if (stats.boosterLeft !== undefined) {
-    let s = `💰¥${stats.boosterLeft.toFixed(0)}`;
-    if (stats.boosterMonthly !== undefined && stats.boosterMonthly > 0) {
-      s += `(月¥${stats.boosterMonthly.toFixed(0)})`;
-    }
-    parts.push(s);
+  // Booster wallet (only if enabled)
+  if (stats.boosterActive && stats.boosterLeft !== undefined) {
+    parts.push(`¥${stats.boosterLeft.toFixed(0)}`);
   }
 
-  return parts.length ? `Kimi: ${parts.join(" ")}` : "";
+  return parts.join(" ");
 }
 
 async function fetchJsonStatus(
