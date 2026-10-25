@@ -105,7 +105,9 @@ export default function (pi: ExtensionAPI) {
               }
             }
 
-            statusText = `${providerName}: ${balanceStr}${deltaPart}`;
+            // The pill carries the number alone: the provider is the bubble's
+            // title, and the configured icon already says what the number is.
+            statusText = `${balanceStr}${deltaPart}`;
             lastSnapshot = {
               provider: providerName,
               text: balanceStr,
