@@ -74,15 +74,17 @@ export function currencyToUnit(currency: string | undefined): string | undefined
   }
 }
 
-export function formatBalance(result: BalanceResult): string {
-  if ("text" in result) return result.text;
-
-  const amount = result.amount.toLocaleString(undefined, {
+/** `¥1,446.14`: an amount with its unit, grouped to two decimals. */
+export function formatAmount(amount: number, unit: string): string {
+  return `${unit}${amount.toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  });
+  })}`;
+}
 
-  return `${result.unit}${amount}`;
+export function formatBalance(result: BalanceResult): string {
+  if ("text" in result) return result.text;
+  return formatAmount(result.amount, result.unit);
 }
 
 // ══════════════════════════════════════════════════════════════

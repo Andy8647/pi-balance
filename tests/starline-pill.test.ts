@@ -105,6 +105,26 @@ test("the bubble shows the balance, the change, the age, and two actions", () =>
   assert.equal(menus, 1);
 });
 
+test("the bubble splits the balance into granted and paid-for", () => {
+  const content = balanceBubbleContent(
+    { ...snapshot, granted: "¥2.00", toppedUp: "¥10.34" },
+    ctx,
+    { refresh() {}, openMenu() {} },
+    1_000,
+  );
+  assert.deepEqual(content.body.slice(0, 4), [
+    "¥12.34",
+    "Granted ¥2.00 · Top-up ¥10.34",
+    "Since last check: ▼ ¥0.05",
+    "Updated 0s ago",
+  ]);
+});
+
+test("without a split the bubble keeps one line per fact", () => {
+  const content = balanceBubbleContent(snapshot, ctx, { refresh() {}, openMenu() {} }, 1_000);
+  assert.deepEqual(content.body.slice(0, 3), ["¥12.34", "Since last check: ▼ ¥0.05", "Updated 0s ago"]);
+});
+
 test("without a balance it says so and still offers the actions", () => {
   const content = balanceBubbleContent(undefined, ctx, { refresh() {}, openMenu() {} });
   assert.equal(content.title, "Balance");

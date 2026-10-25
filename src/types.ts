@@ -2,7 +2,14 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 // ── Balance result ───────────────────────────────────────────
 export type BalanceResult =
-  | { amount: number; unit: string }
+  | {
+      amount: number;
+      unit: string;
+      /** Part of `amount` the provider granted rather than sold, same unit. */
+      granted?: number;
+      /** Part of `amount` paid for, same unit. */
+      toppedUp?: number;
+    }
   | { text: string };
 
 // ── Fetch context passed to every provider ───────────────────

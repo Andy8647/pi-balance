@@ -138,7 +138,7 @@ DeepSeek: ¥49.87
 - **OpenAI Codex 用量** 仅在当前模型 provider 为 `openai-codex` 时显示。扩展会优先复用 pi 的 Codex 订阅认证 headers，并可在可用时回退到 `codex app-server --listen stdio://`；CLI 回退可在 `/balance` 菜单中开关。
 - 菜单使用智能缓存：展开/折叠 provider 时不会触发任何异步计算，体验即时流畅。
 - 网络请求会快速超时；获取失败时状态栏会自动隐藏，不会打断当前会话。
-- **装了 [pi-starline](https://github.com/Andy8647/pi-starline) 时**，点余额 pill 会弹出气泡：当前余额、和上次相比的变化、多久前更新，以及 Refresh 和 Open /balance 两个操作。没装 pi-starline 时一切照旧。
+- **装了 [pi-starline](https://github.com/Andy8647/pi-starline) 时**，点余额 pill 会弹出气泡：当前余额（DeepSeek 还会拆出赠送和充值各多少）、和上次相比的变化、多久前更新，以及 Refresh 和 Open /balance 两个操作。没装 pi-starline 时一切照旧。
 
 ## 🧠 工作原理
 

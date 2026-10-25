@@ -29,6 +29,8 @@ const en: Record<string, string> = {
   // ── Starline pill bubble ──
   pill_title: "Balance",
   pill_no_balance: "No balance for the current model",
+  pill_granted: "Granted {amount}",
+  pill_topped_up: "Top-up {amount}",
   pill_since_last: "Since last check: {delta}",
   pill_updated: "Updated {ago} ago",
   pill_open_menu: "Open /balance",

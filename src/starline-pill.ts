@@ -48,6 +48,10 @@ export type BalanceSnapshot = {
   text: string;
   /** Change since the previous check, already formatted (`▼ ¥0.05`). */
   delta?: string;
+  /** Granted part of `text`, already formatted (`¥100.00`). */
+  granted?: string;
+  /** Paid-for part of `text`, already formatted (`¥1,346.14`). */
+  toppedUp?: string;
   /** Epoch milliseconds of the fetch. */
   updatedAt: number;
 };
@@ -72,9 +76,14 @@ export function balanceBubbleContent(
   actions: BalancePillActions,
   now = Date.now(),
 ): BubbleContent {
+  const split = [
+    snapshot?.granted ? t("pill_granted", { amount: snapshot.granted }) : "",
+    snapshot?.toppedUp ? t("pill_topped_up", { amount: snapshot.toppedUp }) : "",
+  ].filter(Boolean);
   const body: BubbleLine[] = snapshot
     ? [
         snapshot.text,
+        ...(split.length > 0 ? [split.join(" · ")] : []),
         ...(snapshot.delta ? [t("pill_since_last", { delta: snapshot.delta })] : []),
         t("pill_updated", { ago: formatAgo(now - snapshot.updatedAt) }),
       ]

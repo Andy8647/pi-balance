@@ -11,7 +11,7 @@ import {
   isProviderEnabled,
   setProviderEnabled,
 } from "./config.js";
-import { normalizeBaseUrl, hasHeader, formatBalance, formatNumber } from "./utils.js";
+import { normalizeBaseUrl, hasHeader, formatAmount, formatBalance, formatNumber } from "./utils.js";
 import { registry } from "./providers/registry.js";
 import { openBalanceMenu, buildSupportReport } from "./menu.js";
 import { resetSub2ApiProbeCache } from "./providers/sub2api.js";
@@ -109,6 +109,14 @@ export default function (pi: ExtensionAPI) {
               provider: providerName,
               text: balanceStr,
               delta: plainDelta,
+              // Only DeepSeek reports the split; providers without it leave
+              // both unset and the bubble shows the balance alone.
+              granted:
+                result.granted !== undefined ? formatAmount(result.granted, result.unit) : undefined,
+              toppedUp:
+                result.toppedUp !== undefined
+                  ? formatAmount(result.toppedUp, result.unit)
+                  : undefined,
               updatedAt: Date.now(),
             };
           }

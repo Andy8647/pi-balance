@@ -44,6 +44,10 @@ export const deepseekProvider: BalanceProvider = {
     let bestCurrency: string | undefined;
     let bestAmount = -1;
     const amounts = new Map<string, number>();
+    // The same per-currency sums for the two halves of the total, so the bubble
+    // can say how much of the balance was granted rather than paid for.
+    const granted = new Map<string, number>();
+    const toppedUp = new Map<string, number>();
 
     for (const item of infos) {
       const record = getRecord(item);
@@ -54,9 +58,10 @@ export const deepseekProvider: BalanceProvider = {
       const unit = currencyToUnit(currency) ?? currency;
       if (unit === undefined) continue;
 
-      const prev = amounts.get(unit) ?? 0;
-      const sum = prev + amount;
+      const sum = (amounts.get(unit) ?? 0) + amount;
       amounts.set(unit, sum);
+      granted.set(unit, (granted.get(unit) ?? 0) + (toNumber(record?.granted_balance) ?? 0));
+      toppedUp.set(unit, (toppedUp.get(unit) ?? 0) + (toNumber(record?.topped_up_balance) ?? 0));
 
       if (sum > bestAmount) {
         bestAmount = sum;
@@ -66,15 +71,25 @@ export const deepseekProvider: BalanceProvider = {
 
     if (bestCurrency === undefined || bestAmount <= 0) return undefined;
 
+    const split = {
+      granted: granted.get(bestCurrency) ?? 0,
+      toppedUp: toppedUp.get(bestCurrency) ?? 0,
+    };
+
     // Convert USD balances to CNY when PI_BALANCE_CNY_RATE is set.
     if (bestCurrency === "$") {
       const rate = Number(process.env.PI_BALANCE_CNY_RATE);
       if (rate > 0) {
-        return { amount: bestAmount * rate, unit: "¥" };
+        return {
+          amount: bestAmount * rate,
+          unit: "¥",
+          granted: split.granted * rate,
+          toppedUp: split.toppedUp * rate,
+        };
       }
     }
 
-    return { amount: bestAmount, unit: bestCurrency };
+    return { amount: bestAmount, unit: bestCurrency, ...split };
   },
 
   getSupport(

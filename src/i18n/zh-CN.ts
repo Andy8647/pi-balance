@@ -29,6 +29,8 @@ const zhCN: Record<string, string> = {
   // ── Starline pill 气泡 ──
   pill_title: "余额",
   pill_no_balance: "当前模型没有余额信息",
+  pill_granted: "赠送 {amount}",
+  pill_topped_up: "充值 {amount}",
   pill_since_last: "比上次：{delta}",
   pill_updated: "{ago}前更新",
   pill_open_menu: "Open /balance",
