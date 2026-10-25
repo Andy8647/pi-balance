@@ -89,25 +89,22 @@ export default function (pi: ExtensionAPI) {
           } else {
             const balanceStr = formatBalance(result);
 
-            // Compute delta vs previous balance
-            let deltaPart = "";
+            // Change since the previous reading. The pill has no room for it: it
+            // goes in the bubble, which can say what it is measured against.
             let plainDelta: string | undefined;
             if (showDelta && previousBalance && !("text" in previousBalance)) {
               const delta = result.amount - previousBalance.amount;
               if (Math.abs(delta) >= 0.001) {
                 const sign = delta > 0 ? "▲" : "▼";
-                const color = delta > 0 ? "\u001b[34m" : "\u001b[31m";
-                const reset = "\u001b[39m";
                 const absDelta = formatNumber(Math.abs(delta), "0");
                 const unit = result.unit || "$";
-                deltaPart = ` ${color}${sign}${reset}${unit}${color}${absDelta}${reset}`;
                 plainDelta = `${sign} ${unit}${absDelta}`;
               }
             }
 
             // The pill carries the number alone: the provider is the bubble's
             // title, and the configured icon already says what the number is.
-            statusText = `${balanceStr}${deltaPart}`;
+            statusText = balanceStr;
             lastSnapshot = {
               provider: providerName,
               text: balanceStr,

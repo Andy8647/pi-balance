@@ -41,7 +41,7 @@ pi-balance is an **extension** for the [pi coding agent](https://github.com/eare
 > - **Zero-build packaging** — ships TypeScript source directly (pi loads `.ts` extensions natively), no install-time compilation
 
 - ✅ **Auto-detects** your currently active model provider
-- ✅ **Event-driven refresh** — balance updates automatically after each conversation (with delta display ▲▼)
+- ✅ **Event-driven refresh** — balance updates automatically after each conversation; the pill shows the number, the bubble shows the change since the last check (▲▼)
 - ✅ **Live updates** on provider/model switch
 - ✅ **Multi-provider support** — DeepSeek, Moonshot/Kimi, OpenRouter, Sub2Api, OpenAI Codex (and compatible APIs)
 - ✅ **Zero configuration for balance APIs** — supported balance APIs work from existing model headers
@@ -95,7 +95,7 @@ Once installed, pi-balance works **completely automatically**:
 
 1. **On session start** — it fetches your balance immediately
 2. **On model switch** — it re-fetches for the new provider
-3. **After each conversation** (`agent_end`) — automatically refreshes and shows balance delta (▲▼)
+3. **After each conversation** (`agent_end`) — refreshes and records the delta (▲▼) for the bubble
 
 The balance is displayed in the **status bar** at the bottom of your pi terminal:
 
@@ -165,7 +165,7 @@ You can also use command arguments directly:
 
 - **`session_start`** — initial balance fetch when a session begins
 - **`model_select`** — re-fetch when you switch models/providers
-- **`agent_end`** — refresh balance after each conversation, showing delta (▲▼)
+- **`agent_end`** — refresh balance after each conversation and record the delta (▲▼) the bubble shows
 - **`session_shutdown`** — cleanup and clear status
 
 ## 🏗️ Project Structure
