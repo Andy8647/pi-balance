@@ -138,6 +138,7 @@ You can also use command arguments directly:
 - **OpenAI Codex usage** is shown only while the active model provider is `openai-codex`. The extension first reuses pi's Codex subscription auth headers and can fall back to `codex app-server --listen stdio://` when available; the CLI fallback can be toggled in the `/balance` menu.
 - The menu caches support states intelligently: expanding/collapsing providers is instant (no recomputation), while config changes trigger automatic refresh.
 - Network requests time out quickly and failures are hidden from the status bar instead of interrupting your session.
+- **With [pi-starline](https://github.com/Andy8647/pi-starline)**, clicking the balance pill opens a bubble with the balance, the change since the last check and when it was fetched, plus Refresh and Open /balance. Nothing changes without pi-starline.
 
 ## 🧠 How It Works
 
@@ -177,6 +178,7 @@ pi-balance/
 │   ├── config.ts                  # Config load/persist/toggle
 │   ├── utils.ts                   # Helpers (fetch, JSON, type guards)
 │   ├── menu.ts                    # Dynamic menu builder with caching
+│   ├── starline-pill.ts           # Clickable pill when pi-starline is installed
 │   └── providers/
 │       ├── types.ts               # BalanceProvider interface
 │       ├── registry.ts            # Singleton provider registry

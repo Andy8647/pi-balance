@@ -16,6 +16,7 @@ import { registry } from "./providers/registry.js";
 import { openBalanceMenu, buildSupportReport } from "./menu.js";
 import { resetSub2ApiProbeCache } from "./providers/sub2api.js";
 import { t, setLanguage } from "./i18n/index.js";
+import { registerBalancePill, type BalanceSnapshot } from "./starline-pill.js";
 
 // ══════════════════════════════════════════════════════════════
 // Import provider modules to trigger auto-registration
@@ -49,6 +50,9 @@ export default function (pi: ExtensionAPI) {
   let config: BalanceConfig = { ...DEFAULT_CONFIG };
   let currentCtx: ExtensionContext | undefined;
   let previousBalance: { amount: number; unit: string } | undefined;
+  /** The last fetch, for the bubble Starline opens from the pill. */
+  let lastSnapshot: BalanceSnapshot | undefined;
+  let unregisterPill: (() => void) | undefined;
 
   const abortAndClear = () => {
     activeRequest?.abort();
@@ -77,15 +81,17 @@ export default function (pi: ExtensionAPI) {
 
         if (result) {
           let statusText: string;
+          const providerName =
+            ctx.modelRegistry.getProviderDisplayName(model.provider) || model.provider;
           if ("text" in result) {
             statusText = result.text;
+            lastSnapshot = { provider: providerName, text: result.text, updatedAt: Date.now() };
           } else {
-            const providerName =
-              ctx.modelRegistry.getProviderDisplayName(model.provider) || model.provider;
             const balanceStr = formatBalance(result);
 
             // Compute delta vs previous balance
             let deltaPart = "";
+            let plainDelta: string | undefined;
             if (showDelta && previousBalance && !("text" in previousBalance)) {
               const delta = result.amount - previousBalance.amount;
               if (Math.abs(delta) >= 0.001) {
@@ -95,13 +101,21 @@ export default function (pi: ExtensionAPI) {
                 const absDelta = formatNumber(Math.abs(delta), "0");
                 const unit = result.unit || "$";
                 deltaPart = ` ${color}${sign}${reset}${unit}${color}${absDelta}${reset}`;
+                plainDelta = `${sign} ${unit}${absDelta}`;
               }
             }
 
             statusText = `${providerName}: ${balanceStr}${deltaPart}`;
+            lastSnapshot = {
+              provider: providerName,
+              text: balanceStr,
+              delta: plainDelta,
+              updatedAt: Date.now(),
+            };
           }
           ctx.ui.setStatus(STATUS_KEY, statusText);
         } else {
+          lastSnapshot = undefined;
           ctx.ui.setStatus(STATUS_KEY, undefined);
         }
 
@@ -309,7 +323,21 @@ export default function (pi: ExtensionAPI) {
     currentCtx = ctx;
     config = loadConfig(ctx);
     previousBalance = undefined;
+    lastSnapshot = undefined;
     void refreshBalance();
+
+    // With pi-starline installed, clicking the balance pill opens a bubble with
+    // the detail and these two actions. Without it this registers nothing.
+    unregisterPill?.();
+    unregisterPill = registerBalancePill(STATUS_KEY, () => lastSnapshot, {
+      refresh: () => void refreshBalance(true),
+      openMenu: (menuCtx) =>
+        void openBalanceMenu(pi, menuCtx, config, async (nextConfig) => {
+          config = nextConfig;
+          persistConfig(pi, config);
+          await refreshBalance();
+        }),
+    });
   });
 
   pi.on("model_select", async (_event, ctx) => {
@@ -327,6 +355,8 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async (_event, ctx) => {
     requestVersion++;
     abortAndClear();
+    unregisterPill?.();
+    unregisterPill = undefined;
     try {
       ctx.ui.setStatus(STATUS_KEY, undefined);
     } catch {
