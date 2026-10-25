@@ -26,6 +26,13 @@ const en: Record<string, string> = {
   menu_back: "Back",
   menu_display: "Display",
 
+  // ── Starline pill bubble ──
+  pill_title: "Balance",
+  pill_no_balance: "No balance for the current model",
+  pill_since_last: "Since last check: {delta}",
+  pill_updated: "Updated {ago} ago",
+  pill_open_menu: "Open /balance",
+
   // ── Provider descriptions ──
   desc_deepseek: "DeepSeek /user/balance balance",
   desc_moonshot: "Moonshot /v1/users/me/balance balance",

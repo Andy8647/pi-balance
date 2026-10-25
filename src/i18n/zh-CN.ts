@@ -26,6 +26,13 @@ const zhCN: Record<string, string> = {
   menu_back: "Back",
   menu_display: "Display",
 
+  // ── Starline pill 气泡 ──
+  pill_title: "余额",
+  pill_no_balance: "当前模型没有余额信息",
+  pill_since_last: "比上次：{delta}",
+  pill_updated: "{ago}前更新",
+  pill_open_menu: "Open /balance",
+
   // ── Provider 描述 ──
   desc_deepseek: "DeepSeek /user/balance 余额",
   desc_moonshot: "Moonshot /v1/users/me/balance 余额",
