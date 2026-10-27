@@ -68,9 +68,15 @@ export default function (pi: ExtensionAPI) {
       const model = ctx.model;
 
       abortAndClear();
-      ctx.ui.setStatus(STATUS_KEY, undefined);
 
-      if (!model) return;
+      // The last number stays on screen while this request runs. Clearing it first
+      // made the pill blink off and back on at every turn end, which reads as the
+      // balance being unavailable rather than being refreshed. A failed refresh and
+      // a session with no model still clear it, below.
+      if (!model) {
+        ctx.ui.setStatus(STATUS_KEY, undefined);
+        return;
+      }
 
       const controller = new AbortController();
       activeRequest = controller;
@@ -351,6 +357,9 @@ export default function (pi: ExtensionAPI) {
     currentCtx = ctx;
     config = loadConfig(ctx);
     previousBalance = undefined;
+    // A balance belongs to the provider it was read from, so it cannot outlive a
+    // model switch; the refresh below fills it in for the new one.
+    ctx.ui.setStatus(STATUS_KEY, undefined);
     void refreshBalance();
   });
 
