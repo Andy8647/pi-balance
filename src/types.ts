@@ -50,7 +50,7 @@ export type ProviderSupport = {
 // ── Constants ───────────────────────────────────────────────
 export const STATUS_KEY = "provider-balance";
 export const REQUEST_TIMEOUT_MS = 8000;
-export const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+export const REFRESH_INTERVAL_MS = 60 * 1000;
 export const CONFIG_ENTRY_TYPE = "pi-balance-config";
 
 export const DEFAULT_CONFIG: BalanceConfig = {

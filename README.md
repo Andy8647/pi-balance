@@ -31,7 +31,7 @@
 pi-balance is an **extension** for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent) that automatically fetches and displays your AI provider's API credit balance in the pi **status bar**.
 
 - ✅ **Auto-detects** your currently active model provider
-- ✅ **Event-driven refresh** — balance updates automatically after each conversation (with delta display ▲▼)
+- ✅ **Refreshes during tasks** — updates after each model response and once a minute while a task is running (with delta display ▲▼)
 - ✅ **Live updates** on provider/model switch
 - ✅ **Multi-provider support** — DeepSeek, Moonshot/Kimi, OpenRouter, Sub2Api, OpenAI Codex (and compatible APIs)
 - ✅ **Zero configuration for balance APIs** — supported balance APIs work from existing model headers
@@ -86,7 +86,10 @@ Once installed, pi-balance works **completely automatically**:
 
 1. **On session start** — it fetches your balance immediately
 2. **On model switch** — it re-fetches for the new provider
-3. **After each conversation** (`agent_end`) — automatically refreshes and shows balance delta (▲▼)
+3. **During a task** — refreshes immediately after each model response, with an additional query once a minute during generation or long tool calls
+4. **After a task** (`agent_end`) — refreshes again for the final balance; updates during and after a run show balance changes (▲▼)
+
+Automatic refreshes run without blocking model responses or tools. The current balance stays visible while a query is pending, overlapping refresh events are combined, and polling stops when the task ends.
 
 The balance is displayed in the **status bar** at the bottom of your pi terminal:
 
@@ -128,6 +131,7 @@ You can also use command arguments directly:
 - **Custom Sub2Api providers** are discovered from your pi model configuration (`~/.pi/agent/models.json`) and can be enabled/disabled individually from the main menu or `/balance sub2api`. Use `/balance sub2api rescan` after changing model configuration.
 - **OpenAI Codex usage** is shown only while the active model provider is `openai-codex`. The extension first reuses pi's Codex subscription auth headers and can fall back to `codex app-server --listen stdio://` when available; the CLI fallback can be toggled in the `/balance` menu.
 - The menu caches support states intelligently: expanding/collapsing providers is instant (no recomputation), while config changes trigger automatic refresh.
+- Dedicated provider balance APIs are tried first; generic Sub2Api `/usage` endpoints are used as a fallback.
 - Network requests time out quickly and failures are hidden from the status bar instead of interrupting your session.
 
 ## 🧠 How It Works
@@ -146,7 +150,9 @@ You can also use command arguments directly:
 │  ┌─ Extension: pi-balance ───────────────────────────────┐  │
 │  │  session_start  ──►  fetchBalance()  ──►  setStatus() │  │
 │  │  model_select   ──►  fetchBalance()  ──►  setStatus() │  │
-│  │  agent_end     ────►  refreshBalance(showDelta)        │  │
+│  │  agent_start   ────►  start polling every 60s         │  │
+│  │  message_end   ────►  refresh after model response    │  │
+│  │  agent_end     ────►  stop polling + final refresh    │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -155,8 +161,10 @@ You can also use command arguments directly:
 
 - **`session_start`** — initial balance fetch when a session begins
 - **`model_select`** — re-fetch when you switch models/providers
-- **`agent_end`** — refresh balance after each conversation, showing delta (▲▼)
-- **`session_shutdown`** — cleanup and clear status
+- **`agent_start`** — refresh immediately and start polling once a minute
+- **`message_end`** — refresh after each assistant response; user and tool-result messages do not trigger queries
+- **`agent_end`** — stop polling and refresh the final balance
+- **`session_shutdown`** — stop polling, abort requests, and clear status
 
 ## 🏗️ Project Structure
 
@@ -181,7 +189,8 @@ pi-balance/
 │       ├── zh-CN.ts              # Chinese translations
 │       └── en.ts                 # English translations
 ├── tests/
-│   └── index.test.ts
+│   ├── index.test.ts
+│   └── refresh.test.ts           # Refresh timing, coalescing, and lifecycle regressions
 ├── LICENSE                       # MIT license
 ├── README.md                     # English documentation
 ├── README.zh-CN.md               # Chinese documentation

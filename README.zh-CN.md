@@ -31,7 +31,7 @@
 pi-balance 是 [pi 编码代理](https://github.com/earendil-works/pi-coding-agent) 的一款**扩展**，能够自动获取并在 pi **状态栏**中实时显示你的 AI 提供商 API 额度余额。
 
 - ✅ **自动识别**当前使用的模型提供商
-- ✅ **事件驱动刷新** —— 每次对话结束后自动更新余额（并显示增减 ▲▼）
+- ✅ **任务中自动刷新** —— 每次模型回复完成后更新，任务运行期间每分钟补充刷新（并显示增减 ▲▼）
 - ✅ **切换即更新**—— 切换模型或提供商时立即刷新
 - ✅ **多提供商支持** —— DeepSeek、Moonshot/Kimi、OpenRouter、Sub2Api、OpenAI Codex 及兼容 API
 - ✅ **余额接口零配置** —— 支持的余额接口可复用模型 headers
@@ -86,7 +86,10 @@ pi install ./
 
 1. **会话启动时** —— 立即获取余额
 2. **切换模型时** —— 刷新新提供商的余额
-3. **每次对话后**（`agent_end`）—— 自动刷新并显示余额变化（▲▼）
+3. **任务运行期间** —— 每次模型回复完成后立即刷新；模型仍在生成或工具执行耗时较长时，每分钟补充查询一次
+4. **任务结束后**（`agent_end`）—— 再次刷新，获取最终余额；运行期间及结束后的刷新会显示余额变化（▲▼）
+
+自动刷新不会阻塞模型回复或工具执行；查询期间保留已显示的余额，重叠的刷新事件会合并处理。任务结束后停止定时查询。
 
 余额会显示在 pi 终端底部的**状态栏**中：
 
@@ -128,6 +131,7 @@ DeepSeek: ¥49.87
 - **自定义 Sub2Api provider** 会从 pi 模型配置中自动探测，并可在主菜单或 `/balance sub2api` 中逐个开启或关闭。修改模型配置后，可使用 `/balance sub2api rescan` 重新扫描。
 - **OpenAI Codex 用量** 仅在当前模型 provider 为 `openai-codex` 时显示。扩展会优先复用 pi 的 Codex 订阅认证 headers，并可在可用时回退到 `codex app-server --listen stdio://`；CLI 回退可在 `/balance` 菜单中开关。
 - 菜单使用智能缓存：展开/折叠 provider 时不会触发任何异步计算，体验即时流畅。
+- 优先请求提供商的专用余额接口，获取不到余额时再尝试通用 Sub2Api `/usage` 接口。
 - 网络请求会快速超时；获取失败时状态栏会自动隐藏，不会打断当前会话。
 
 ## 🧠 工作原理
@@ -146,7 +150,9 @@ DeepSeek: ¥49.87
 │  ┌─ 扩展: pi-balance ────────────────────────────────────┐  │
 │  │  session_start  ──►  fetchBalance()  ──►  setStatus() │  │
 │  │  model_select   ──►  fetchBalance()  ──►  setStatus() │  │
-│  │  agent_end     ────►  refreshBalance(showDelta)        │  │
+│  │  agent_start   ────►  开始每 60 秒定时刷新            │  │
+│  │  message_end   ────►  模型回复后刷新余额              │  │
+│  │  agent_end     ────►  停止定时查询并刷新最终余额      │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -155,8 +161,10 @@ DeepSeek: ¥49.87
 
 - **`session_start`** —— 会话开始时获取余额
 - **`model_select`** —— 切换模型/提供商时重新获取
-- **`agent_end`** —— 每次对话结束后刷新余额，显示增减（▲▼）
-- **`session_shutdown`** —— 清理并清除状态
+- **`agent_start`** —— 立即刷新并开始每分钟定时查询
+- **`message_end`** —— 每次模型回复完成后刷新，工具结果和用户消息不会触发查询
+- **`agent_end`** —— 停止定时查询并刷新最终余额
+- **`session_shutdown`** —— 停止定时查询，取消请求并清除状态
 
 ## 🏗️ 项目结构
 
@@ -181,7 +189,8 @@ pi-balance/
 │       ├── zh-CN.ts              # 中文翻译
 │       └── en.ts                 # 英文翻译
 ├── tests/
-│   └── index.test.ts
+│   ├── index.test.ts
+│   └── refresh.test.ts           # 刷新时机、请求合并与生命周期回归测试
 ├── LICENSE                       # MIT 许可证
 ├── README.md                     # 英文文档
 ├── README.zh-CN.md               # 中文文档
