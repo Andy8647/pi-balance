@@ -28,7 +28,7 @@ const zhCN: Record<string, string> = {
 
   // ── Provider 描述 ──
   desc_deepseek: "DeepSeek /user/balance 余额",
-  desc_moonshot: "Moonshot /v1/users/me/balance 余额",
+  desc_moonshot: "Moonshot 余额 / Kimi Code 额度",
   desc_openrouter: "OpenRouter /credits 剩余额度",
   desc_sub2api: "Sub2Api /usage 剩余额度",
   desc_codex: "OpenAI Codex ChatGPT 订阅用量",

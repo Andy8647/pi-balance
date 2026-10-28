@@ -28,7 +28,7 @@ const en: Record<string, string> = {
 
   // ── Provider descriptions ──
   desc_deepseek: "DeepSeek /user/balance balance",
-  desc_moonshot: "Moonshot /v1/users/me/balance balance",
+  desc_moonshot: "Moonshot balance / Kimi Code quota",
   desc_openrouter: "OpenRouter /credits remaining credits",
   desc_sub2api: "Sub2Api /usage remaining quota",
   desc_codex: "OpenAI Codex ChatGPT subscription usage",

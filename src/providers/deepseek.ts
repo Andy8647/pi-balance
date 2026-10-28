@@ -38,43 +38,39 @@ export const deepseekProvider: BalanceProvider = {
 
     if (!Array.isArray(infos)) return undefined;
 
-    // DeepSeek returns one entry per currency (e.g. USD + CNY) with
-    // unstable array order. Pick the currency that has the largest
-    // total_balance, ignoring zero-balance entries.
-    let bestCurrency: string | undefined;
-    let bestAmount = -1;
+    // Aggregate each currency before selecting a balance; API order is unstable.
     const amounts = new Map<string, number>();
 
     for (const item of infos) {
       const record = getRecord(item);
       const amount = toNumber(record?.total_balance);
-      if (amount === undefined) continue;
+      const currency = typeof record?.currency === "string"
+        ? record.currency.trim().toUpperCase()
+        : undefined;
+      if (amount === undefined || !currency) continue;
 
-      const currency = typeof record?.currency === "string" ? record.currency : undefined;
-      const unit = currencyToUnit(currency) ?? currency;
-      if (unit === undefined) continue;
-
-      const prev = amounts.get(unit) ?? 0;
-      const sum = prev + amount;
-      amounts.set(unit, sum);
-
-      if (sum > bestAmount) {
-        bestAmount = sum;
-        bestCurrency = unit;
-      }
+      amounts.set(currency, (amounts.get(currency) ?? 0) + amount);
     }
 
-    if (bestCurrency === undefined || bestAmount <= 0) return undefined;
+    // Prefer a funded currency (including debt) over an empty one. Currency
+    // codes break ties consistently, including when every balance is zero.
+    const balances = [...amounts]
+      .filter(([, amount]) => Number.isFinite(amount))
+      .sort(([a, amountA], [b, amountB]) => amountB - amountA || a.localeCompare(b));
+    const best = balances.find(([, amount]) => amount !== 0) ?? balances[0];
+    if (!best) return undefined;
+    const [currency, amount] = best;
 
-    // Convert USD balances to CNY when PI_BALANCE_CNY_RATE is set.
-    if (bestCurrency === "$") {
+    // Convert only the selected USD balance, with a finite positive rate.
+    if (currency === "USD") {
       const rate = Number(process.env.PI_BALANCE_CNY_RATE);
-      if (rate > 0) {
-        return { amount: bestAmount * rate, unit: "¥" };
+      const converted = amount * rate;
+      if (Number.isFinite(rate) && rate > 0 && Number.isFinite(converted)) {
+        return { amount: converted, unit: "¥" };
       }
     }
 
-    return { amount: bestAmount, unit: bestCurrency };
+    return { amount, unit: currencyToUnit(currency) ?? currency };
   },
 
   getSupport(

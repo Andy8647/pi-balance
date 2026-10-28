@@ -4,6 +4,7 @@ import type { BalanceResult, BalanceConfig, FetchContext } from "./types.js";
 import {
   STATUS_KEY,
   DEFAULT_CONFIG,
+  REFRESH_INTERVAL_MS,
 } from "./types.js";
 import {
   loadConfig,
@@ -49,10 +50,18 @@ export default function (pi: ExtensionAPI) {
   let config: BalanceConfig = { ...DEFAULT_CONFIG };
   let currentCtx: ExtensionContext | undefined;
   let previousBalance: { amount: number; unit: string } | undefined;
+  let refreshTimer: ReturnType<typeof setInterval> | undefined;
+  let refreshQueued = false;
+
+  const stopPolling = () => {
+    clearInterval(refreshTimer);
+    refreshTimer = undefined;
+  };
 
   const abortAndClear = () => {
     activeRequest?.abort();
     activeRequest = undefined;
+    refreshQueued = false;
   };
 
   const refreshBalance = async (showDelta = false) => {
@@ -64,9 +73,11 @@ export default function (pi: ExtensionAPI) {
       const model = ctx.model;
 
       abortAndClear();
-      ctx.ui.setStatus(STATUS_KEY, undefined);
 
-      if (!model) return;
+      if (!model) {
+        ctx.ui.setStatus(STATUS_KEY, undefined);
+        return;
+      }
 
       const controller = new AbortController();
       activeRequest = controller;
@@ -114,17 +125,33 @@ export default function (pi: ExtensionAPI) {
       } finally {
         if (version === requestVersion) {
           activeRequest = undefined;
+          if (refreshQueued) {
+            refreshQueued = false;
+            refreshInBackground();
+          }
         }
       }
     } catch (err) {
       // ctx is stale after session replacement/reload — stop
       if (err instanceof Error && err.message.includes("stale after session")) {
+        currentCtx = undefined;
+        stopPolling();
         requestVersion++;
         abortAndClear();
         return;
       }
       throw err;
     }
+  };
+
+  // Coalesce lifecycle events without aborting a request that is still fetching.
+  // A queued refresh observes charges that may have arrived during that request.
+  const refreshInBackground = () => {
+    if (activeRequest) {
+      refreshQueued = true;
+      return;
+    }
+    void refreshBalance(true);
   };
 
   // ── Command registration ─────────────────────────────────
@@ -171,6 +198,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase();
 
+      currentCtx = ctx;
       config = loadConfig(ctx);
 
       // refresh
@@ -306,9 +334,11 @@ export default function (pi: ExtensionAPI) {
   // ── Lifecycle events ────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
+    stopPolling();
     currentCtx = ctx;
     config = loadConfig(ctx);
     previousBalance = undefined;
+    ctx.ui.setStatus(STATUS_KEY, undefined);
     void refreshBalance();
   });
 
@@ -316,15 +346,36 @@ export default function (pi: ExtensionAPI) {
     currentCtx = ctx;
     config = loadConfig(ctx);
     previousBalance = undefined;
+    ctx.ui.setStatus(STATUS_KEY, undefined);
     void refreshBalance();
+  });
+
+  pi.on("agent_start", async (_event, ctx) => {
+    currentCtx = ctx;
+    stopPolling();
+    refreshTimer = setInterval(() => {
+      // Slow requests can outlast the interval, especially with CLI fallback.
+      if (!activeRequest) refreshInBackground();
+    }, REFRESH_INTERVAL_MS);
+    refreshTimer.unref();
+    refreshInBackground();
+  });
+
+  pi.on("message_end", async (event, ctx) => {
+    if (event.message.role !== "assistant") return;
+    currentCtx = ctx;
+    refreshInBackground();
   });
 
   pi.on("agent_end", async (_event, ctx) => {
     currentCtx = ctx;
-    void refreshBalance(true);
+    stopPolling();
+    refreshInBackground();
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    currentCtx = undefined;
+    stopPolling();
     requestVersion++;
     abortAndClear();
     try {
@@ -362,7 +413,12 @@ async function fetchProviderBalance(
 
   const context: FetchContext = { model, baseUrl, headers, config };
 
-  for (const provider of registry.getAll()) {
+  // Try dedicated balance APIs before probing generic compatibility endpoints.
+  const providers = [...registry.getAll()].sort(
+    (a, b) => Number(a.key === "sub2api") - Number(b.key === "sub2api"),
+  );
+
+  for (const provider of providers) {
     if (signal?.aborted) return undefined;
     if (!isProviderEnabled(config, provider.key)) continue;
     if (!provider.shouldTry(model, baseUrl)) continue;

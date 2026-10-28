@@ -16,16 +16,12 @@
   <a href="#-安装"><img src="https://img.shields.io/badge/安装-📦-00B894?style=flat-square"></a>
   <a href="#-支持的提供商"><img src="https://img.shields.io/badge/支持的提供商-🔌-FD79A8?style=flat-square"></a>
   <a href="#-使用"><img src="https://img.shields.io/badge/使用-🚀-0984E3?style=flat-square"></a>
-  <a href="https://www.npmjs.com/package/@andy8647/pi-balance"><img src="https://img.shields.io/npm/v/@andy8647/pi-balance?style=flat-square&color=CB3837"></a>
+  <a href="https://www.npmjs.com/package/pi-balance"><img src="https://img.shields.io/npm/v/pi-balance?style=flat-square&color=CB3837"></a>
   <a href="./README.md"><img src="https://img.shields.io/badge/🇬🇧_English-6C5CE7?style=flat-square"></a>
 </p>
 
 <p align="center">
-  <img src="./assets/preview.png" alt="pi-balance 预览" width="800">
-</p>
-
-<p align="center">
-  <sub>截图中的余额段由 <a href="https://github.com/Andy8647/pi-starline">pi-starline</a> 渲染 —— Starship 风格的 pi powerline 状态栏。<br>上：Kimi Code 5h/7d 配额 · 下：DeepSeek 余额</sub>
+  <img src="https://img.dog/file/1779542581467_mzRI9XShNB2pFCVDlx1f8.webp" alt="pi-balance 预览" width="600">
 </p>
 
 ---
@@ -34,14 +30,8 @@
 
 pi-balance 是 [pi 编码代理](https://github.com/earendil-works/pi-coding-agent) 的一款**扩展**，能够自动获取并在 pi **状态栏**中实时显示你的 AI 提供商 API 额度余额。
 
-> **说明**：本仓库是 [DragonYH/pi-balance](https://github.com/DragonYH/pi-balance) 的 fork，原扩展的全部功劳归 [@DragonYH](https://github.com/DragonYH)。本 fork 以 [`@andy8647/pi-balance`](https://www.npmjs.com/package/@andy8647/pi-balance) 发布，并新增了：
->
-> - **Kimi 编码套餐支持** —— 5 小时限速窗口与 7 天配额显示（通过 `/usages` 接口），以及 booster 钱包余额
-> - **DeepSeek 多币种余额的稳定识别**（`balance_infos`）
-> - **零构建打包** —— 直接发布 TypeScript 源码（pi 原生加载 `.ts` 扩展），安装时无需编译
-
 - ✅ **自动识别**当前使用的模型提供商
-- ✅ **事件驱动刷新** —— 每次对话结束后自动更新余额（并显示增减 ▲▼）
+- ✅ **任务中自动刷新** —— 每次模型回复完成后更新，任务运行期间每分钟补充刷新（并显示增减 ▲▼）
 - ✅ **切换即更新**—— 切换模型或提供商时立即刷新
 - ✅ **多提供商支持** —— DeepSeek、Moonshot/Kimi、OpenRouter、Sub2Api、OpenAI Codex 及兼容 API
 - ✅ **余额接口零配置** —— 支持的余额接口可复用模型 headers
@@ -53,21 +43,22 @@ pi-balance 是 [pi 编码代理](https://github.com/earendil-works/pi-coding-age
 ### 方式一：从 npm 安装（推荐）
 
 ```bash
-pi install npm:@andy8647/pi-balance
+pi install npm:pi-balance
 ```
 
 ### 方式二：从 GitHub 安装
 
 ```bash
-pi install git:github.com/Andy8647/pi-balance
+pi install git:github.com/DragonYH/pi-balance
 ```
 
 ### 方式三：本地开发安装
 
 ```bash
-git clone https://github.com/Andy8647/pi-balance.git
+git clone https://github.com/DragonYH/pi-balance.git
 cd pi-balance
 npm install
+npm run build
 pi install ./
 ```
 
@@ -79,8 +70,9 @@ pi install ./
 
 | 提供商 | 余额接口 | 显示内容 |
 |----------|-----------------|----------|
-| **DeepSeek** | `/user/balance` | ¥（人民币）余额 |
-| **Moonshot / Kimi** | `/v1/users/me/balance` | ¥（人民币）可用余额 |
+| **DeepSeek** | `/user/balance` | 所选币种的余额（人民币或美元） |
+| **Moonshot** | `/v1/users/me/balance` | ¥（人民币）可用余额 |
+| **Kimi Code** | `/v1/usages`、`/usages` | 5 小时与每周剩余额度、重置倒计时及已启用的加量钱包余额 |
 | **Sub2Api** | `/usage` | $（美元）剩余额度 |
 | **兼容 API** | `/usage`、`/v1/usage` | $（美元）剩余额度 |
 | **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5 小时与每周用量剩余额度 |
@@ -95,7 +87,10 @@ pi install ./
 
 1. **会话启动时** —— 立即获取余额
 2. **切换模型时** —— 刷新新提供商的余额
-3. **每次对话后**（`agent_end`）—— 自动刷新并显示余额变化（▲▼）
+3. **任务运行期间** —— 每次模型回复完成后立即刷新；模型仍在生成或工具执行耗时较长时，每分钟补充查询一次
+4. **任务结束后**（`agent_end`）—— 再次刷新，获取最终余额；运行期间及结束后的刷新会显示余额变化（▲▼）
+
+自动刷新不会阻塞模型回复或工具执行；查询期间保留已显示的余额，重叠的刷新事件会合并处理。任务结束后停止定时查询。
 
 余额会显示在 pi 终端底部的**状态栏**中：
 
@@ -133,10 +128,13 @@ DeepSeek: ¥49.87
 
 ### 配置说明
 
+- **DeepSeek 多币种余额** 会按币种分别汇总，显示数值最大的非零余额；数值相同时按币种代码稳定选择，零余额和负余额也会显示。将 `PI_BALANCE_CNY_RATE` 设置为有限正数的美元兑人民币汇率（例如 `7.2`），可将选中的美元余额换算成人民币显示。不同币种的金额不会直接相加。
+- **Kimi Code 额度** 按可用时间窗口显示剩余百分比，例如 `Kimi: 5h·56%↺2h30m 7d·80%↺6d`。已启用的加量钱包以人民币显示，保留两位小数。支持识别 `kimi` / `kimi-*` provider 和 `kimi.com` 接口，与 Moonshot 共用 `moonshot` 显示开关。额度接口不可用时，会尝试标准 Moonshot 余额接口。
 - **Provider 显示开关** 会由 `/balance` 菜单保存，并在下一次刷新时生效。
 - **自定义 Sub2Api provider** 会从 pi 模型配置中自动探测，并可在主菜单或 `/balance sub2api` 中逐个开启或关闭。修改模型配置后，可使用 `/balance sub2api rescan` 重新扫描。
 - **OpenAI Codex 用量** 仅在当前模型 provider 为 `openai-codex` 时显示。扩展会优先复用 pi 的 Codex 订阅认证 headers，并可在可用时回退到 `codex app-server --listen stdio://`；CLI 回退可在 `/balance` 菜单中开关。
 - 菜单使用智能缓存：展开/折叠 provider 时不会触发任何异步计算，体验即时流畅。
+- 优先请求提供商的专用余额接口，获取不到余额时再尝试通用 Sub2Api `/usage` 接口。
 - 网络请求会快速超时；获取失败时状态栏会自动隐藏，不会打断当前会话。
 
 ## 🧠 工作原理
@@ -155,7 +153,9 @@ DeepSeek: ¥49.87
 │  ┌─ 扩展: pi-balance ────────────────────────────────────┐  │
 │  │  session_start  ──►  fetchBalance()  ──►  setStatus() │  │
 │  │  model_select   ──►  fetchBalance()  ──►  setStatus() │  │
-│  │  agent_end     ────►  refreshBalance(showDelta)        │  │
+│  │  agent_start   ────►  开始每 60 秒定时刷新            │  │
+│  │  message_end   ────►  模型回复后刷新余额              │  │
+│  │  agent_end     ────►  停止定时查询并刷新最终余额      │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -164,8 +164,10 @@ DeepSeek: ¥49.87
 
 - **`session_start`** —— 会话开始时获取余额
 - **`model_select`** —— 切换模型/提供商时重新获取
-- **`agent_end`** —— 每次对话结束后刷新余额，显示增减（▲▼）
-- **`session_shutdown`** —— 清理并清除状态
+- **`agent_start`** —— 立即刷新并开始每分钟定时查询
+- **`message_end`** —— 每次模型回复完成后刷新，工具结果和用户消息不会触发查询
+- **`agent_end`** —— 停止定时查询并刷新最终余额
+- **`session_shutdown`** —— 停止定时查询，取消请求并清除状态
 
 ## 🏗️ 项目结构
 
@@ -190,11 +192,15 @@ pi-balance/
 │       ├── zh-CN.ts              # 中文翻译
 │       └── en.ts                 # 英文翻译
 ├── tests/
-│   └── index.test.ts
+│   ├── deepseek.test.ts          # 币种选择与汇率换算回归测试
+│   ├── index.test.ts
+│   ├── moonshot.test.ts          # Kimi 额度解析、识别与接口回退测试
+│   └── refresh.test.ts           # 刷新时机、请求合并与生命周期回归测试
 ├── LICENSE                       # MIT 许可证
 ├── README.md                     # 英文文档
 ├── README.zh-CN.md               # 中文文档
 ├── package.json                  # Node.js 与 pi 包清单
+├── tsconfig.build.json           # 构建配置
 └── tsconfig.json                 # TypeScript 配置
 ```
 
@@ -204,6 +210,12 @@ pi-balance/
 
 ```bash
 npm run typecheck
+```
+
+### 构建
+
+```bash
+npm run build
 ```
 
 ### 测试
@@ -232,10 +244,10 @@ git push origin vX.Y.Z
 推送 tag 前，请在 npm 为该包配置 Trusted Publishing：
 
 - Publisher：GitHub Actions
-- Owner：`Andy8647`
+- Owner：`DragonYH`
 - Repository：`pi-balance`
-- Workflow：`publish.yml`
-- Environment：`npm-publish`
+- Workflow：`release.yml`
+- Environment：如果 workflow 没有配置 environment，则留空。
 
 ### 添加新的提供商
 
@@ -305,8 +317,6 @@ import "./providers/yourprovider.js";
 
 <p align="center">
   <sub>为 <a href="https://github.com/earendil-works/pi-coding-agent">pi 编码代理</a> 生态构建</sub>
-  <br>
-  <sub>Fork 自 <a href="https://github.com/DragonYH/pi-balance">DragonYH/pi-balance</a> · 原扩展作者 <a href="https://github.com/DragonYH">@DragonYH</a></sub>
   <br>
   <a href="./README.md"><img src="https://img.shields.io/badge/🇬🇧_Read_in_English-6C5CE7?style=for-the-badge"></a>
 </p>

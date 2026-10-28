@@ -16,16 +16,12 @@
   <a href="#-installation"><img src="https://img.shields.io/badge/Installation-📦-00B894?style=flat-square"></a>
   <a href="#-supported-providers"><img src="https://img.shields.io/badge/Providers-🔌-FD79A8?style=flat-square"></a>
   <a href="#-usage"><img src="https://img.shields.io/badge/Usage-🚀-0984E3?style=flat-square"></a>
-  <a href="https://www.npmjs.com/package/@andy8647/pi-balance"><img src="https://img.shields.io/npm/v/@andy8647/pi-balance?style=flat-square&color=CB3837"></a>
+  <a href="https://www.npmjs.com/package/pi-balance"><img src="https://img.shields.io/npm/v/pi-balance?style=flat-square&color=CB3837"></a>
   <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/🇨🇳_中文-FADB4A?style=flat-square"></a>
 </p>
 
 <p align="center">
-  <img src="./assets/preview.png" alt="pi-balance preview" width="800">
-</p>
-
-<p align="center">
-  <sub>Balance segments rendered inside <a href="https://github.com/Andy8647/pi-starline">pi-starline</a> — a Starship-inspired powerline statusline for pi.<br>Top: Kimi Code 5h/7d quota · Bottom: DeepSeek balance</sub>
+  <img src="https://img.dog/file/1779542581467_mzRI9XShNB2pFCVDlx1f8.webp" alt="pi-balance preview" width="600">
 </p>
 
 ---
@@ -34,14 +30,8 @@
 
 pi-balance is an **extension** for the [pi coding agent](https://github.com/earendil-works/pi-coding-agent) that automatically fetches and displays your AI provider's API credit balance in the pi **status bar**.
 
-> **Note**: This repository is a fork of [DragonYH/pi-balance](https://github.com/DragonYH/pi-balance) — all credit for the original extension goes to [@DragonYH](https://github.com/DragonYH). This fork is published as [`@andy8647/pi-balance`](https://www.npmjs.com/package/@andy8647/pi-balance) and adds:
->
-> - **Kimi coding plan support** — 5-hour rate limit and 7-day quota display (via the `/usages` endpoint), plus booster wallet balance
-> - **Stable DeepSeek currency detection** for multi-currency `balance_infos`
-> - **Zero-build packaging** — ships TypeScript source directly (pi loads `.ts` extensions natively), no install-time compilation
-
 - ✅ **Auto-detects** your currently active model provider
-- ✅ **Event-driven refresh** — balance updates automatically after each conversation (with delta display ▲▼)
+- ✅ **Refreshes during tasks** — updates after each model response and once a minute while a task is running (with delta display ▲▼)
 - ✅ **Live updates** on provider/model switch
 - ✅ **Multi-provider support** — DeepSeek, Moonshot/Kimi, OpenRouter, Sub2Api, OpenAI Codex (and compatible APIs)
 - ✅ **Zero configuration for balance APIs** — supported balance APIs work from existing model headers
@@ -53,21 +43,22 @@ pi-balance is an **extension** for the [pi coding agent](https://github.com/eare
 ### Option 1: Install from npm (Recommended)
 
 ```bash
-pi install npm:@andy8647/pi-balance
+pi install npm:pi-balance
 ```
 
 ### Option 2: Install from GitHub
 
 ```bash
-pi install git:github.com/Andy8647/pi-balance
+pi install git:github.com/DragonYH/pi-balance
 ```
 
 ### Option 3: Local Development
 
 ```bash
-git clone https://github.com/Andy8647/pi-balance.git
+git clone https://github.com/DragonYH/pi-balance.git
 cd pi-balance
 npm install
+npm run build
 pi install ./
 ```
 
@@ -79,8 +70,9 @@ Restart pi. You should see the balance indicator appear in the status bar once y
 
 | Provider | Balance Endpoint | Display |
 |----------|--------------------------|---------|
-| **DeepSeek** | `/user/balance` | ¥ (CNY) balance |
-| **Moonshot / Kimi** | `/v1/users/me/balance` | ¥ (CNY) available balance |
+| **DeepSeek** | `/user/balance` | Balance in the selected currency (CNY or USD) |
+| **Moonshot** | `/v1/users/me/balance` | ¥ (CNY) available balance |
+| **Kimi Code** | `/v1/usages`, `/usages` | 5-hour and weekly quota remaining, reset countdowns, and enabled booster balance |
 | **Sub2Api** | `/usage` | $ (USD) remaining balance |
 | **Compatible APIs** | `/usage`, `/v1/usage` | $ (USD) remaining balance |
 | **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5-hour and weekly usage remaining |
@@ -95,7 +87,10 @@ Once installed, pi-balance works **completely automatically**:
 
 1. **On session start** — it fetches your balance immediately
 2. **On model switch** — it re-fetches for the new provider
-3. **After each conversation** (`agent_end`) — automatically refreshes and shows balance delta (▲▼)
+3. **During a task** — refreshes immediately after each model response, with an additional query once a minute during generation or long tool calls
+4. **After a task** (`agent_end`) — refreshes again for the final balance; updates during and after a run show balance changes (▲▼)
+
+Automatic refreshes run without blocking model responses or tools. The current balance stays visible while a query is pending, overlapping refresh events are combined, and polling stops when the task ends.
 
 The balance is displayed in the **status bar** at the bottom of your pi terminal:
 
@@ -133,10 +128,13 @@ You can also use command arguments directly:
 
 ### Configuration Notes
 
+- **DeepSeek currencies** are grouped separately. The largest nonzero per-currency balance is shown, with a stable currency-code tie break; zero and negative balances stay visible. Set `PI_BALANCE_CNY_RATE` to a finite positive USD-to-CNY rate (for example, `7.2`) to display a selected USD balance in CNY. Different currencies are never added together.
+- **Kimi Code quota** shows the remaining percentage for each available window, for example `Kimi: 5h·56%↺2h30m 7d·80%↺6d`. An enabled booster wallet is shown in CNY with two decimal places. Both `kimi` / `kimi-*` providers and `kimi.com` endpoints are detected; Kimi shares the `moonshot` display toggle. If usage endpoints are unavailable, the standard Moonshot balance endpoint is tried.
 - **Provider display toggles** are saved by the `/balance` menu and apply on the next refresh.
 - **Custom Sub2Api providers** are discovered from your pi model configuration (`~/.pi/agent/models.json`) and can be enabled/disabled individually from the main menu or `/balance sub2api`. Use `/balance sub2api rescan` after changing model configuration.
 - **OpenAI Codex usage** is shown only while the active model provider is `openai-codex`. The extension first reuses pi's Codex subscription auth headers and can fall back to `codex app-server --listen stdio://` when available; the CLI fallback can be toggled in the `/balance` menu.
 - The menu caches support states intelligently: expanding/collapsing providers is instant (no recomputation), while config changes trigger automatic refresh.
+- Dedicated provider balance APIs are tried first; generic Sub2Api `/usage` endpoints are used as a fallback.
 - Network requests time out quickly and failures are hidden from the status bar instead of interrupting your session.
 
 ## 🧠 How It Works
@@ -155,7 +153,9 @@ You can also use command arguments directly:
 │  ┌─ Extension: pi-balance ───────────────────────────────┐  │
 │  │  session_start  ──►  fetchBalance()  ──►  setStatus() │  │
 │  │  model_select   ──►  fetchBalance()  ──►  setStatus() │  │
-│  │  agent_end     ────►  refreshBalance(showDelta)        │  │
+│  │  agent_start   ────►  start polling every 60s         │  │
+│  │  message_end   ────►  refresh after model response    │  │
+│  │  agent_end     ────►  stop polling + final refresh    │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -164,8 +164,10 @@ You can also use command arguments directly:
 
 - **`session_start`** — initial balance fetch when a session begins
 - **`model_select`** — re-fetch when you switch models/providers
-- **`agent_end`** — refresh balance after each conversation, showing delta (▲▼)
-- **`session_shutdown`** — cleanup and clear status
+- **`agent_start`** — refresh immediately and start polling once a minute
+- **`message_end`** — refresh after each assistant response; user and tool-result messages do not trigger queries
+- **`agent_end`** — stop polling and refresh the final balance
+- **`session_shutdown`** — stop polling, abort requests, and clear status
 
 ## 🏗️ Project Structure
 
@@ -190,11 +192,15 @@ pi-balance/
 │       ├── zh-CN.ts              # Chinese translations
 │       └── en.ts                 # English translations
 ├── tests/
-│   └── index.test.ts
+│   ├── deepseek.test.ts          # Currency selection and conversion regressions
+│   ├── index.test.ts
+│   ├── moonshot.test.ts          # Kimi quota parsing, detection, and request fallback
+│   └── refresh.test.ts           # Refresh timing, coalescing, and lifecycle regressions
 ├── LICENSE                       # MIT license
 ├── README.md                     # English documentation
 ├── README.zh-CN.md               # Chinese documentation
 ├── package.json                  # Node.js and pi package manifest
+├── tsconfig.build.json           # Build configuration
 └── tsconfig.json                 # TypeScript configuration
 ```
 
@@ -204,6 +210,12 @@ pi-balance/
 
 ```bash
 npm run typecheck
+```
+
+### Build
+
+```bash
+npm run build
 ```
 
 ### Test
@@ -232,10 +244,10 @@ git push origin vX.Y.Z
 Before pushing the tag, configure npm Trusted Publishing for this package:
 
 - Publisher: GitHub Actions
-- Owner: `Andy8647`
+- Owner: `DragonYH`
 - Repository: `pi-balance`
-- Workflow: `publish.yml`
-- Environment: `npm-publish`
+- Workflow: `release.yml`
+- Environment: leave empty unless you add one to the workflow.
 
 ### Adding a New Provider
 
@@ -305,8 +317,6 @@ That's it — the provider auto-registers, appears in the `/balance` menu, and p
 
 <p align="center">
   <sub>Built for the <a href="https://github.com/earendil-works/pi-coding-agent">pi coding agent</a> ecosystem</sub>
-  <br>
-  <sub>Forked from <a href="https://github.com/DragonYH/pi-balance">DragonYH/pi-balance</a> · original extension by <a href="https://github.com/DragonYH">@DragonYH</a></sub>
   <br>
   <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/🇨🇳_阅读中文版本-FFD700?style=for-the-badge"></a>
 </p>

@@ -19,6 +19,20 @@ export function extractMoonshotAvailableBalance(value: unknown): number | undefi
   return toNumber(getRecord(payload.data)?.available_balance);
 }
 
+function hasProviderHost(baseUrl: string, domain: string): boolean {
+  try {
+    const hostname = new URL(baseUrl).hostname;
+    return hostname === domain || hostname.endsWith(`.${domain}`);
+  } catch {
+    return false;
+  }
+}
+
+function isKimiCoding(model: Model<Api>, baseUrl: string): boolean {
+  const provider = model.provider ?? "";
+  return provider === "kimi" || provider.startsWith("kimi-") || hasProviderHost(baseUrl, "kimi.com");
+}
+
 // ══════════════════════════════════════════════════════════════
 // Moonshot / Kimi balance provider
 // ══════════════════════════════════════════════════════════════
@@ -33,31 +47,23 @@ export const moonshotProvider: BalanceProvider = {
   },
 
   shouldTry(model: Model<Api>, baseUrl: string): boolean {
-    const provider = model.provider ?? "";
-    const root = getProviderRootUrl(baseUrl);
-    return (
-      provider === "moonshot" ||
-      provider === "kimi" ||
-      provider.startsWith("kimi-") ||
-      root.includes("moonshot.cn") ||
-      root.includes("kimi.com")
-    );
+    return model.provider === "moonshot" || isKimiCoding(model, baseUrl) ||
+      hasProviderHost(baseUrl, "moonshot.cn") || hasProviderHost(baseUrl, "moonshot.ai");
   },
 
   async fetchBalance(
     context: FetchContext,
     signal?: AbortSignal,
   ): Promise<BalanceResult | undefined> {
-    const { baseUrl, headers } = context;
+    const { model, baseUrl, headers } = context;
     const root = getProviderRootUrl(baseUrl);
 
-    // Kimi Code (coding plan): show 5h ratelimit status instead of balance.
-    if (root.includes("kimi.com")) {
+    if (isKimiCoding(model, baseUrl)) {
       const statsText = await fetchKimiCodingStatus(root, headers, signal);
       if (statsText) return { text: statsText };
     }
 
-    // Standard Moonshot API balance endpoint.
+    // Standard Moonshot API balance endpoint, also used as a Kimi fallback.
     const data = await getJson(`${root}/v1/users/me/balance`, headers, signal);
     const amount = extractMoonshotAvailableBalance(data);
     if (amount === undefined) return undefined;
@@ -65,21 +71,9 @@ export const moonshotProvider: BalanceProvider = {
   },
 
   getSupport(ctx: ExtensionContext, _config: BalanceConfig): ProviderSupport {
-    const models = ctx.modelRegistry.getAll();
-    const availableModels = ctx.modelRegistry.getAvailable();
-
-    const hasModel = models.some((model) =>
-      model.provider === "moonshot" ||
-      model.provider?.startsWith("kimi") ||
-      model.baseUrl?.includes("moonshot.cn") ||
-      model.baseUrl?.includes("kimi.com"),
-    );
-    const configured = availableModels.some((model) =>
-      model.provider === "moonshot" ||
-      model.provider?.startsWith("kimi") ||
-      model.baseUrl?.includes("moonshot.cn") ||
-      model.baseUrl?.includes("kimi.com"),
-    );
+    const matches = (model: Model<Api>) => this.shouldTry(model, model.baseUrl ?? "");
+    const hasModel = ctx.modelRegistry.getAll().some(matches);
+    const configured = ctx.modelRegistry.getAvailable().some(matches);
 
     return {
       provider: this.definition,
@@ -114,157 +108,123 @@ interface KimiRatios {
   reset5?: number;
   ratio7?: number;
   reset7?: number;
-  boosterLeft?: number;   // CNY remaining in booster wallet
-  boosterMonthly?: number; // CNY used this month
-  boosterActive?: boolean; // booster wallet is enabled
+  boosterLeft?: number;
 }
 
-function readKimiUsageDetail(d: unknown): KimiUsageDetail | undefined {
-  if (!d || typeof d !== "object") return undefined;
-  const detail = d as Record<string, unknown>;
-  const limit = Number(detail.limit ?? detail.limit_amount ?? detail.total);
-  const usedRaw = detail.used ?? detail.used_amount;
-  const used = Number.isFinite(Number(usedRaw))
-    ? Number(usedRaw)
-    : Number.isFinite(limit) && Number.isFinite(Number(detail.remaining))
-      ? limit - Number(detail.remaining)
-      : NaN;
-  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return undefined;
-  const resetRaw = detail.resetTime ?? detail.reset_at ?? detail.resetAt;
-  const reset = typeof resetRaw === "string" ? Date.parse(resetRaw) : undefined;
-  return { ratio: used / limit, reset };
+function kimiNumber(value: unknown): number | undefined {
+  if (typeof value === "string" && !value.trim()) return undefined;
+  return toNumber(value);
 }
 
-function kimiWindowSeconds(w: unknown): number {
-  if (!w || typeof w !== "object") return 0;
-  const win = w as Record<string, unknown>;
-  if (Number.isFinite(Number(win.seconds))) return Number(win.seconds);
-  const unit = KIMI_WINDOW_UNIT_SECS[String(win.timeUnit ?? "")] ?? 0;
-  return Number(win.duration ?? 0) * unit;
+function kimiResetTime(value: unknown): number | undefined {
+  const timestamp = kimiNumber(value);
+  const reset = timestamp !== undefined
+    ? timestamp < 1e12 ? timestamp * 1000 : timestamp
+    : typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(reset) ? reset : undefined;
+}
+
+function readKimiUsageDetail(value: unknown): KimiUsageDetail | undefined {
+  const detail = getRecord(value);
+  if (!detail) return undefined;
+  const limit = kimiNumber(detail.limit ?? detail.limit_amount ?? detail.total);
+  if (limit === undefined || limit <= 0) return undefined;
+
+  const remaining = kimiNumber(detail.remaining);
+  const used = kimiNumber(detail.used ?? detail.used_amount) ??
+    (remaining !== undefined ? limit - remaining : undefined);
+  if (used === undefined) return undefined;
+
+  return {
+    ratio: Math.min(1, Math.max(0, used / limit)),
+    reset: kimiResetTime(detail.resetTime ?? detail.reset_at ?? detail.resetAt),
+  };
+}
+
+function kimiWindowSeconds(value: unknown): number | undefined {
+  const window = getRecord(value);
+  if (!window) return undefined;
+  const seconds = kimiNumber(window.seconds);
+  if (seconds !== undefined) return seconds;
+  const duration = kimiNumber(window.duration);
+  const unit = KIMI_WINDOW_UNIT_SECS[String(window.timeUnit ?? "")];
+  return duration !== undefined && unit !== undefined ? duration * unit : undefined;
 }
 
 function extractKimiUsagesRatio(payload: unknown): KimiRatios | undefined {
-  if (!payload || typeof payload !== "object") return undefined;
-  const p = payload as Record<string, unknown>;
+  const root = getRecord(payload);
+  if (!root) return undefined;
+  const data = getRecord(root.data) ?? root;
   const result: KimiRatios = {};
 
-  // Weekly summary
-  const weekly = readKimiUsageDetail(p.usage);
+  const weekly = readKimiUsageDetail(data.usage);
   if (weekly) {
     result.ratio7 = weekly.ratio;
     result.reset7 = weekly.reset;
   }
 
-  // Per-window limits (5h, 7d, etc.)
   const items: unknown[] = [];
-  if (Array.isArray(p.data)) items.push(...p.data);
-  if (Array.isArray(p.limits)) items.push(...p.limits);
+  if (Array.isArray(data.data)) items.push(...data.data);
+  if (Array.isArray(data.limits)) items.push(...data.limits);
 
   for (const item of items) {
-    if (!item || typeof item !== "object") continue;
-    const it = item as Record<string, unknown>;
-    const d = (it.detail && typeof it.detail === "object" ? it.detail : it) as Record<string, unknown>;
-    const windowSecs = kimiWindowSeconds(it.window ?? d.window ?? d.windowSeconds) ||
-      Number(d.windowSeconds ?? 0);
-    const is5h = windowSecs === 18000;
-    const isWeek = windowSecs === 604800;
-    const detail = readKimiUsageDetail(d);
-    if (!detail) continue;
+    const record = getRecord(item);
+    if (!record) continue;
+    const detail = getRecord(record.detail) ?? record;
+    const windowSeconds = kimiWindowSeconds(record.window ?? detail.window) ??
+      kimiNumber(record.windowSeconds ?? detail.windowSeconds);
+    const usage = readKimiUsageDetail(detail);
+    if (!usage) continue;
 
-    if (is5h && result.ratio5 === undefined) {
-      result.ratio5 = detail.ratio;
-      result.reset5 = detail.reset;
-    } else if (isWeek && result.ratio7 === undefined) {
-      result.ratio7 = detail.ratio;
-      result.reset7 = detail.reset;
+    if (windowSeconds === 18000 && result.ratio5 === undefined) {
+      result.ratio5 = usage.ratio;
+      result.reset5 = usage.reset;
+    } else if (windowSeconds === 604800 && result.ratio7 === undefined) {
+      result.ratio7 = usage.ratio;
+      result.reset7 = usage.reset;
     }
   }
 
-  // Booster wallet (only if enabled)
-  const bw = p.boosterWallet;
-  if (bw && typeof bw === "object") {
-    const b = bw as Record<string, unknown>;
-    const status = String(b.status ?? "");
-    const active = status === "STATUS_ENABLED";
-    result.boosterActive = active;
-    if (active) {
-      const bal = b.balance;
-      if (bal && typeof bal === "object") {
-        const bl = bal as Record<string, unknown>;
-        const left = Number(bl.amountLeft ?? 0);
-        result.boosterLeft = left / 1e8; // nano-CNY → CNY
-      }
-      const mu = b.monthlyUsed;
-      if (mu && typeof mu === "object") {
-        const m = mu as Record<string, unknown>;
-        result.boosterMonthly = Number(m.priceInCents ?? 0) / 100;
-      }
-    }
+  const wallet = getRecord(data.boosterWallet);
+  if (wallet?.status === "STATUS_ENABLED") {
+    const left = kimiNumber(getRecord(wallet.balance)?.amountLeft);
+    if (left !== undefined) result.boosterLeft = left / 1e8;
   }
 
-  return (result.ratio5 !== undefined || result.ratio7 !== undefined) ? result : undefined;
+  return result.ratio5 !== undefined || result.ratio7 !== undefined ? result : undefined;
 }
 
-function formatKimiCodingStatus(
-  stats: { ratio5?: number; reset5?: number; ratio7?: number; reset7?: number; boosterLeft?: number; boosterMonthly?: number; boosterActive?: boolean },
-  now = Date.now(),
-): string {
-  const parts: string[] = [];
+function formatKimiWindow(
+  name: "5h" | "7d",
+  ratio: number | undefined,
+  reset: number | undefined,
+  now: number,
+): string | undefined {
+  if (ratio === undefined) return undefined;
+  let text = `${name}·${Math.round((1 - ratio) * 100)}%`;
+  if (reset === undefined || reset <= now) return text;
 
-  // 5h rolling quota
-  if (stats.ratio5 !== undefined) {
-    const pct = Math.round(stats.ratio5 * 100);
-    let s = `5h·${pct}%`;
-    if (stats.reset5 && stats.reset5 > now) {
-      const ms = stats.reset5 - now;
-      const h = Math.floor(ms / 3600000);
-      const m = Math.ceil((ms % 3600000) / 60000);
-      s += `↺${h > 0 ? `${h}h` : ""}${m}m`;
-    }
-    parts.push(s);
+  if (name === "5h") {
+    const minutes = Math.ceil((reset - now) / 60000);
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+    text += `↺${hours > 0 ? `${hours}h` : ""}${rest > 0 ? `${rest}m` : ""}`;
+  } else {
+    const hours = Math.ceil((reset - now) / 3600000);
+    const days = Math.floor(hours / 24);
+    const rest = hours % 24;
+    text += `↺${days > 0 ? `${days}d` : ""}${rest > 0 ? `${rest}h` : ""}`;
   }
-
-  // 7d weekly quota
-  if (stats.ratio7 !== undefined) {
-    const pct = Math.round(stats.ratio7 * 100);
-    let s = `7d·${pct}%`;
-    if (stats.reset7 && stats.reset7 > now) {
-      const ms = stats.reset7 - now;
-      const d = Math.floor(ms / 86400000);
-      const h = Math.ceil((ms % 86400000) / 3600000);
-      s += `↺${d > 0 ? `${d}d` : ""}${h}h`;
-    }
-    parts.push(s);
-  }
-
-  // Booster wallet (only if enabled)
-  if (stats.boosterActive && stats.boosterLeft !== undefined) {
-    parts.push(`¥${stats.boosterLeft.toFixed(0)}`);
-  }
-
-  return parts.join(" ");
+  return text;
 }
 
-async function fetchJsonStatus(
-  url: string,
-  headers: Record<string, string>,
-  parentSignal?: AbortSignal,
-): Promise<{ status: number; data: unknown }> {
-  if (parentSignal?.aborted) return { status: 0, data: undefined };
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  const timeout = setTimeout(abort, 10000);
-  parentSignal?.addEventListener("abort", abort, { once: true });
-  try {
-    const response = await fetch(url, { method: "GET", headers, signal: controller.signal });
-    if (!response.ok) return { status: response.status, data: undefined };
-    return { status: response.status, data: await response.json() };
-  } catch {
-    return { status: -1, data: undefined };
-  } finally {
-    clearTimeout(timeout);
-    parentSignal?.removeEventListener("abort", abort);
-  }
+function formatKimiCodingStatus(stats: KimiRatios, now = Date.now()): string {
+  const parts = [
+    formatKimiWindow("5h", stats.ratio5, stats.reset5, now),
+    formatKimiWindow("7d", stats.ratio7, stats.reset7, now),
+  ].filter((part): part is string => part !== undefined);
+  if (stats.boosterLeft !== undefined) parts.push(`¥${stats.boosterLeft.toFixed(2)}`);
+  return `Kimi: ${parts.join(" ")}`;
 }
 
 async function fetchKimiCodingStatus(
@@ -274,16 +234,10 @@ async function fetchKimiCodingStatus(
 ): Promise<string | undefined> {
   const candidates = [`${root}/v1/usages`, `${root}/usages`];
   for (const url of candidates) {
-    const res = await fetchJsonStatus(
-      url,
-      { ...headers, "User-Agent": "KimiCLI/1.6" },
-      signal,
-    );
-    if (!res.data) continue;
-    const ratios = extractKimiUsagesRatio(res.data);
-    if (ratios?.ratio5 !== undefined) {
-      return formatKimiCodingStatus(ratios);
-    }
+    if (signal?.aborted) return undefined;
+    const data = await getJson(url, { ...headers, "User-Agent": "KimiCLI/1.6" }, signal);
+    const ratios = extractKimiUsagesRatio(data);
+    if (ratios) return formatKimiCodingStatus(ratios);
   }
   return undefined;
 }
