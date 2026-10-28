@@ -83,7 +83,7 @@ Restart pi. You should see the balance indicator appear in the status bar once y
 | **Moonshot / Kimi** | `/v1/users/me/balance` | ¥ (CNY) available balance |
 | **Sub2Api** | `/usage` | $ (USD) remaining balance |
 | **Compatible APIs** | `/usage`, `/v1/usage` | $ (USD) remaining balance |
-| **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5-hour and weekly usage remaining |
+| **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5-hour usage remaining; the 7-day window, reset countdown, and reset credits are in the bubble |
 | **OpenRouter** | `/v1/credits` | $ (USD) remaining credits |
 
 > The extension automatically detects which provider you're using based on your current model configuration — no manual setup required.

@@ -46,6 +46,8 @@ export type BalanceSnapshot = {
   provider: string;
   /** The balance (`¥12.34`) or a provider's own summary (Codex usage). */
   text: string;
+  /** Extra lines the bubble lists below `text`, already formatted. */
+  detail?: string[];
   /** Change since the previous check, already formatted (`▼ ¥0.05`). */
   delta?: string;
   /** Granted part of `text`, already formatted (`¥100.00`). */
@@ -83,6 +85,7 @@ export function balanceBubbleContent(
   const body: BubbleLine[] = snapshot
     ? [
         snapshot.text,
+        ...(snapshot.detail ?? []),
         ...(split.length > 0 ? [split.join(" · ")] : []),
         ...(snapshot.delta ? [t("pill_since_last", { delta: snapshot.delta })] : []),
         t("pill_updated", { ago: formatAgo(now - snapshot.updatedAt) }),

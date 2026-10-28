@@ -36,7 +36,8 @@ export { extractOpenRouterRemaining } from "./providers/openrouter.js";
 export {
   normalizeBackendPayload,
   normalizeAppServerResponse,
-  formatCodexUsageStatusline,
+  formatCodexUsage,
+  formatResetsIn,
   selectCodexSnapshot,
 } from "./providers/codex.js";
 
@@ -91,7 +92,12 @@ export default function (pi: ExtensionAPI) {
             ctx.modelRegistry.getProviderDisplayName(model.provider) || model.provider;
           if ("text" in result) {
             statusText = result.text;
-            lastSnapshot = { provider: providerName, text: result.text, updatedAt: Date.now() };
+            lastSnapshot = {
+              provider: providerName,
+              text: result.text,
+              detail: result.detail,
+              updatedAt: Date.now(),
+            };
           } else {
             const balanceStr = formatBalance(result);
 

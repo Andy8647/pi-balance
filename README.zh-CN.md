@@ -83,7 +83,7 @@ pi install ./
 | **Moonshot / Kimi** | `/v1/users/me/balance` | ¥（人民币）可用余额 |
 | **Sub2Api** | `/usage` | $（美元）剩余额度 |
 | **兼容 API** | `/usage`、`/v1/usage` | $（美元）剩余额度 |
-| **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5 小时与每周用量剩余额度 |
+| **OpenAI Codex** | ChatGPT Codex usage API / `codex app-server` | 5 小时用量剩余；7 天窗口、重置倒计时与重置卡次数在 bubble 里 |
 | **OpenRouter** | `/v1/credits` | $（美元）剩余额度 |
 
 > 扩展会根据你当前的模型配置自动检测所使用的提供商 —— 无需手动设置。

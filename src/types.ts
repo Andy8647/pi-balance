@@ -10,7 +10,11 @@ export type BalanceResult =
       /** Part of `amount` paid for, same unit. */
       toppedUp?: number;
     }
-  | { text: string };
+  | {
+      text: string;
+      /** Extra lines for the pill bubble; the pill itself shows `text` only. */
+      detail?: string[];
+    };
 
 // ── Fetch context passed to every provider ───────────────────
 export type FetchContext = {
@@ -69,7 +73,6 @@ export const DEFAULT_CONFIG: BalanceConfig = {
 export const CODEX_PROVIDER_ID = "openai-codex";
 export const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 export const CODEX_APP_SERVER_TIMEOUT_MS = 15000;
-export const CODEX_STATUS_PREFIX = "📊 codex";
 export const MAX_ERROR_BODY_CHARS = 600;
 export const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 export const SUB2API_PROBE_CACHE_TTL_MS = 60 * 1000;
@@ -84,6 +87,8 @@ export type CodexUsageReport = {
   source: "pi-auth" | "codex-app-server";
   capturedAt: number;
   planType?: string;
+  /** ChatGPT grants that clear a rate limit that was reached. */
+  resetCredits?: { available: number; applicable: number };
   snapshots: NormalizedRateLimitSnapshot[];
 };
 
@@ -99,6 +104,8 @@ export type NormalizedRateLimitWindow = {
   usedPercent: number;
   windowMinutes?: number;
   resetsAt?: number;
+  /** Seconds until the window resets, when the provider reports it directly. */
+  resetAfterSeconds?: number;
 };
 
 export type NormalizedCredits = {

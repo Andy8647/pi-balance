@@ -5,7 +5,8 @@ import {
   extractRemaining,
   extractMoonshotAvailableBalance,
   extractOpenRouterRemaining,
-  formatCodexUsageStatusline,
+  formatCodexUsage,
+  formatResetsIn,
   getSub2ApiUsageUrls,
   normalizeAppServerResponse,
   normalizeBackendPayload,
@@ -131,7 +132,7 @@ test("selectCodexSnapshot prefers the active Codex model bucket", () => {
   assert.equal(selected?.limitId, "gpt-5-codex");
 });
 
-test("formatCodexUsageStatusline formats remaining percentage and credits fallback", () => {
+test("formatCodexUsage keeps the short window in the pill and the rest in the bubble", () => {
   const usageReport = normalizeAppServerResponse(
     {
       rateLimits: {
@@ -146,7 +147,7 @@ test("formatCodexUsageStatusline formats remaining percentage and credits fallba
     2000,
   );
   assert.ok(usageReport);
-  assert.equal(formatCodexUsageStatusline(usageReport), "📊 codex 75% 5h 60% wk");
+  assert.deepEqual(formatCodexUsage(usageReport), { text: "75% 5h", detail: ["7d 60%"] });
 
   const creditsReport = normalizeAppServerResponse(
     {
@@ -162,7 +163,43 @@ test("formatCodexUsageStatusline formats remaining percentage and credits fallba
     2000,
   );
   assert.ok(creditsReport);
-  assert.equal(formatCodexUsageStatusline(creditsReport), "📊 codex 12.35 credits");
+  assert.deepEqual(formatCodexUsage(creditsReport), { text: "12.35 credits", detail: [] });
+});
+
+test("formatResetsIn prefers the reported remaining seconds", () => {
+  assert.equal(formatResetsIn({ usedPercent: 0, resetAfterSeconds: 16_779 }), "4h39m");
+  assert.equal(formatResetsIn({ usedPercent: 0, resetAfterSeconds: 451_612 }), "5d5h");
+  assert.equal(formatResetsIn({ usedPercent: 0, resetAfterSeconds: 900 }), "15m");
+  assert.equal(formatResetsIn({ usedPercent: 0, resetsAt: 123 }), undefined);
+});
+
+test("normalizeBackendPayload carries reset credits and the reset countdown", () => {
+  const report = normalizeBackendPayload(
+    {
+      plan_type: "plus",
+      rate_limit: {
+        primary_window: {
+          used_percent: 1,
+          limit_window_seconds: 18_000,
+          reset_after_seconds: 16_779,
+        },
+        secondary_window: {
+          used_percent: 12,
+          limit_window_seconds: 604_800,
+          reset_after_seconds: 451_612,
+        },
+      },
+      rate_limit_reset_credits: { available_count: 2, applicable_available_count: 1 },
+    },
+    3000,
+    "pi-auth",
+  );
+  assert.ok(report);
+  assert.deepEqual(report.resetCredits, { available: 2, applicable: 1 });
+  assert.deepEqual(formatCodexUsage(report), {
+    text: "99% 5h",
+    detail: ["5h resets in 4h39m", "7d 88% · resets in 5d5h", "reset credits ×2"],
+  });
 });
 
 test("extractOpenRouterRemaining should compute remaining from total_credits minus total_usage", () => {

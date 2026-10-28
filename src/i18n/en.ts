@@ -61,6 +61,10 @@ const en: Record<string, string> = {
   codex_no_credits: "no credits",
   codex_unlimited: "unlimited",
   codex_credits: "credits",
+  codex_window_short: "5h",
+  codex_window_week: "7d",
+  codex_resets_in: "resets in {duration}",
+  codex_reset_credits: "reset credits ×{count}",
   codex_cli_fallback: "CLI fallback",
 };
 

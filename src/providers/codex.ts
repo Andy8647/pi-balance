@@ -16,7 +16,6 @@ import {
   CODEX_PROVIDER_ID,
   CODEX_USAGE_URL,
   CODEX_APP_SERVER_TIMEOUT_MS,
-  CODEX_STATUS_PREFIX,
   MAX_ERROR_BODY_CHARS,
   JWT_CLAIM_PATH,
 } from "../types.js";
@@ -160,8 +159,22 @@ export function normalizeBackendPayload(
   }
 
   return snapshots.length > 0
-    ? { source, capturedAt, planType: asString(payload.plan_type), snapshots }
+    ? {
+        source,
+        capturedAt,
+        planType: asString(payload.plan_type),
+        resetCredits: normalizeResetCredits(payload.rate_limit_reset_credits),
+        snapshots,
+      }
     : undefined;
+}
+
+function normalizeResetCredits(value: unknown): CodexUsageReport["resetCredits"] {
+  const credits = getRecord(value);
+  if (!credits) return undefined;
+  const available = toNumber(credits.available_count);
+  if (available === undefined) return undefined;
+  return { available, applicable: toNumber(credits.applicable_available_count) ?? available };
 }
 
 function normalizeBackendSnapshot(
@@ -188,6 +201,7 @@ function normalizeBackendWindow(value: unknown): NormalizedRateLimitWindow | und
     usedPercent,
     windowMinutes: limitSeconds && limitSeconds > 0 ? Math.ceil(limitSeconds / 60) : undefined,
     resetsAt: toNumber(window.reset_at),
+    resetAfterSeconds: toNumber(window.reset_after_seconds),
   };
 }
 
@@ -271,18 +285,58 @@ function normalizeCredits(
 // Codex: statusline formatting
 // ══════════════════════════════════════════════════════════════
 
-export function formatCodexUsageStatusline(
+export function formatCodexUsage(
   report: CodexUsageReport,
   model?: Pick<Model<Api>, "id" | "name" | "provider">,
-): string {
+): { text: string; detail: string[] } {
   const snapshot = selectCodexSnapshot(report, model);
-  if (!snapshot) return `${CODEX_STATUS_PREFIX} unavailable`;
+  if (!snapshot) return { text: "unavailable", detail: [] };
 
-  const parts = [`${CODEX_STATUS_PREFIX}${formatCodexStatuslineSuffix(snapshot)}`];
+  // The pill keeps the short window only; the rest goes in the bubble.
+  const parts: string[] = [];
+  const variant = formatCodexStatuslineSuffix(snapshot).trim();
+  if (variant) parts.push(variant);
   if (snapshot.primary) parts.push(`${formatRemainingPercent(snapshot.primary)} 5h`);
-  if (snapshot.secondary) parts.push(`${formatRemainingPercent(snapshot.secondary)} wk`);
-  if (parts.length === 1 && snapshot.credits) parts.push(formatCredits(snapshot.credits));
-  return parts.join(" ");
+  if (!snapshot.primary && snapshot.credits) parts.push(formatCredits(snapshot.credits));
+
+  const detail: string[] = [];
+  const shortResets = snapshot.primary ? formatResetsIn(snapshot.primary) : undefined;
+  if (shortResets) {
+    detail.push(`${t("codex_window_short")} ${t("codex_resets_in", { duration: shortResets })}`);
+  }
+  if (snapshot.secondary) {
+    const remaining = formatRemainingPercent(snapshot.secondary);
+    const resets = formatResetsIn(snapshot.secondary);
+    detail.push(
+      resets
+        ? `${t("codex_window_week")} ${remaining} · ${t("codex_resets_in", { duration: resets })}`
+        : `${t("codex_window_week")} ${remaining}`,
+    );
+  }
+  if (report.resetCredits && report.resetCredits.available > 0) {
+    detail.push(t("codex_reset_credits", { count: String(report.resetCredits.available) }));
+  }
+
+  return { text: parts.join(" ") || "unavailable", detail };
+}
+
+/** `5d6h`, `4h39m`, `12m`: how long until a window resets. */
+export function formatResetsIn(
+  window: NormalizedRateLimitWindow,
+  now = Date.now(),
+): string | undefined {
+  const seconds =
+    window.resetAfterSeconds ??
+    (window.resetsAt !== undefined && window.resetsAt > 0 && window.resetsAt < 1e11
+      ? window.resetsAt - Math.floor(now / 1000)
+      : undefined);
+  if (seconds === undefined || seconds <= 0) return undefined;
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${Math.max(1, minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d${hours % 24}h`;
 }
 
 export function selectCodexSnapshot(
@@ -563,7 +617,7 @@ export const codexProvider: BalanceProvider = {
         ? await queryCodexUsageViaAppServer(signal)
         : undefined);
 
-    return report ? { text: formatCodexUsageStatusline(report, context.model) } : undefined;
+    return report ? formatCodexUsage(report, context.model) : undefined;
   },
 
   getSupport(ctx: ExtensionContext, config: BalanceConfig): ProviderSupport {

@@ -61,6 +61,10 @@ const zhCN: Record<string, string> = {
   codex_no_credits: "no credits",
   codex_unlimited: "unlimited",
   codex_credits: "credits",
+  codex_window_short: "5h",
+  codex_window_week: "7天",
+  codex_resets_in: "{duration} 后重置",
+  codex_reset_credits: "重置卡 ×{count}",
   codex_cli_fallback: "CLI fallback",
 };
 
