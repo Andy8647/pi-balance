@@ -70,7 +70,7 @@ pi install ./
 
 | 提供商 | 余额接口 | 显示内容 |
 |----------|-----------------|----------|
-| **DeepSeek** | `/user/balance` | ¥（人民币）余额 |
+| **DeepSeek** | `/user/balance` | 所选币种的余额（人民币或美元） |
 | **Moonshot / Kimi** | `/v1/users/me/balance` | ¥（人民币）可用余额 |
 | **Sub2Api** | `/usage` | $（美元）剩余额度 |
 | **兼容 API** | `/usage`、`/v1/usage` | $（美元）剩余额度 |
@@ -127,6 +127,7 @@ DeepSeek: ¥49.87
 
 ### 配置说明
 
+- **DeepSeek 多币种余额** 会按币种分别汇总，显示数值最大的非零余额；数值相同时按币种代码稳定选择，零余额和负余额也会显示。将 `PI_BALANCE_CNY_RATE` 设置为有限正数的美元兑人民币汇率（例如 `7.2`），可将选中的美元余额换算成人民币显示。不同币种的金额不会直接相加。
 - **Provider 显示开关** 会由 `/balance` 菜单保存，并在下一次刷新时生效。
 - **自定义 Sub2Api provider** 会从 pi 模型配置中自动探测，并可在主菜单或 `/balance sub2api` 中逐个开启或关闭。修改模型配置后，可使用 `/balance sub2api rescan` 重新扫描。
 - **OpenAI Codex 用量** 仅在当前模型 provider 为 `openai-codex` 时显示。扩展会优先复用 pi 的 Codex 订阅认证 headers，并可在可用时回退到 `codex app-server --listen stdio://`；CLI 回退可在 `/balance` 菜单中开关。
